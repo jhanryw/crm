@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --qarvon-primary: #00A86B;
+  /* ajuste se tiver o verde oficial */
+  --qarvon-primary-dark: #008F5A;
+  --qarvon-primary-light: #E6F7F1;
+  --qarvon-text: #171716;
+  --qarvon-bg: #ffffff;
+}
+
+body {
+  @apply bg-white;
+  color: var(--qarvon-text);
+}
+
+/* Links */
+a {
+  color: var(--qarvon-primary);
+}
+
+a:hover {
+  color: var(--qarvon-primary-dark);
+}
+
+/* Botões primários */
+.btn-primary {
+  background-color: var(--qarvon-primary);
+  color: white;
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-primary:hover {
+  background-color: var(--qarvon-primary-dark);
+}
+
+/* Cards */
+.card {
+  @apply bg-white border border-gray-200 rounded-xl shadow-sm;
+}
+
+/* Sidebar */
+.sidebar {
+  background-color: #ffffff;
+  border-right: 1px solid #e5e5e5;
+}

@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  crm-qarvon:
+    image: crm-qarvon:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crm-qarvon
+    restart: unless-stopped
+    env_file:
+      - .env.local
+    # Map a port that the server (like Nginx) will proxy. 
+    # Example: Nginx passes requests from https://meu-crm.meudominio.com to localhost:3000
+    ports:
+      - "3000:3000"
+    # To connect to supabase, logto, and listmonk, it's best to join them on the same network
+    networks:
+      - app-net
+
+# Assume a shared network exists if Supabase, Logto, etc are already deployed with Docker.
+# Change the network name to whatever your existing network is named.
+networks:
+  app-net:
+    external: true
+    name: 'supabase-network' # Change this if your network is named differently
