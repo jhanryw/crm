@@ -10,6 +10,11 @@ services:
     restart: unless-stopped
     env_file:
       - .env.local
+    environment:
+      # Força o Node a usar IPv4 para as requisições, resolvendo problemas de DNS (fetch failed) do undici no Node.js
+      - NODE_OPTIONS=--dns-result-order=ipv4first
+      # Descomente a linha abaixo (e coloque um # no começo dela no seu .env) PARA DEBUG LOCAL de SSL caso seu Nginx use certificado auto-assinado internamente:
+      # - NODE_TLS_REJECT_UNAUTHORIZED=0
     # Map a port that the server (like Nginx) will proxy. 
     # Example: Nginx passes requests from https://meu-crm.meudominio.com to localhost:3000
     ports:
