@@ -13,14 +13,14 @@ services:
     environment:
       - NODE_OPTIONS=--dns-result-order=ipv4first
       - NODE_TLS_REJECT_UNAUTHORIZED=0
-      extra_hosts:
-        # Troque pelo SEU domínio exato do endpoint do Logto
-        - "crm-logto.vodct5.easypanel.host:host-gateway"
-      ports:
-        - "3000:3000"
+    extra_hosts:
+      # Troque pelo SEU domínio exato do endpoint do Logto
+      - "crm-logto.vodct5.easypanel.host:host-gateway"
+    ports:
+      - "3000:3000"
     # To connect to supabase, logto, and listmonk, it's best to join them on the same network
-      networks:
-        - app-net
+    networks:
+      - app-net
 
 # Assume a shared network exists if Supabase, Logto, etc are already deployed with Docker.
 # Change the network name to whatever your existing network is named.
