@@ -55,7 +55,13 @@ export async function GET(request: NextRequest) {
             error: 'Auth failed',
             details: error.message,
             cause: error.cause,
-            hint: 'Check if LOGTO_ENDPOINT is reachable from inside the container',
+            debug: {
+                endpoint: logtoConfig.endpoint,
+                appId: logtoConfig.appId,
+                redirectUri: `${logtoConfig.baseUrl}/api/auth/sign-in-callback`,
+                baseUrl: logtoConfig.baseUrl
+            },
+            hint: 'Verify if the redirectUri above is EXACTLY the same as configured in Logto Admin Console',
         }, { status: 500 });
     }
 
