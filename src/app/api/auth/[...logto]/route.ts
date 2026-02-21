@@ -16,14 +16,14 @@ export async function GET(request: NextRequest) {
         }
 
         if (action === 'sign-in-callback') {
-            // O Proxy do Easypanel às vezes esconde o HTTPS.
-            // Aqui nós garantimos que o SDK do Logto veja a URL correta com HTTPS.
+            // Reconstruímos a URL de callback usando o nosso baseUrl oficial.
+            // Isso evita erros de mismatch causados por proxies (Nginx) que podem
+            // alterar o host ou o protocolo da requisição interna.
             const url = new URL(request.url);
-            if (logtoConfig.baseUrl.startsWith('https')) {
-                url.protocol = 'https:';
-                console.log('Processed Callback URL:', url.toString());
-            }
-            return await handleSignIn(logtoConfig, new URL(url.toString()));
+            const callbackUrl = new URL(`${logtoConfig.baseUrl}/api/auth/sign-in-callback${url.search}`);
+
+            console.log('Reconstructed Callback URL:', callbackUrl.toString());
+            return await handleSignIn(logtoConfig, callbackUrl);
         }
 
         if (action === 'sign-out') {
