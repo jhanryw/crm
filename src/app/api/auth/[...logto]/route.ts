@@ -16,13 +16,12 @@ export async function GET(request: NextRequest) {
         }
 
         if (action === 'sign-in-callback') {
-            // Reconstruímos a URL de callback usando o nosso baseUrl oficial.
-            // Isso evita erros de mismatch causados por proxies (Nginx) que podem
-            // alterar o host ou o protocolo da requisição interna.
             const url = new URL(request.url);
-            const callbackUrl = new URL(`${logtoConfig.baseUrl}/api/auth/sign-in-callback${url.search}`);
+            // Criamos a URL de callback absoluta para bater com a do Logto Admin
+            const callbackUrl = new URL(logtoConfig.baseUrl);
+            callbackUrl.pathname = '/api/auth/sign-in-callback';
+            callbackUrl.search = url.search;
 
-            console.log('Reconstructed Callback URL:', callbackUrl.toString());
             return await handleSignIn(logtoConfig, callbackUrl);
         }
 
