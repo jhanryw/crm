@@ -44,6 +44,7 @@ export async function GET(request: NextRequest) {
 
         console.error('--- LOGTO ERROR DETAILS ---');
         console.error('Message:', error.message);
+        console.error('Received Endpoint:', logtoConfig.endpoint);
         console.error('Cause:', error.cause);
         if (error.cause) {
             console.error('Cause Details:', JSON.stringify(error.cause));
