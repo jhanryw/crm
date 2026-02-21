@@ -29,7 +29,16 @@ export async function GET(request: NextRequest) {
 
         if (action === 'sign-in-callback') {
             console.log('Handling Callback URL:', request.url);
-            await handleSignIn(logtoConfig, new URL(request.url));
+
+            // Força o uso de HTTPS no processamento do callback se o nosso baseUrl for HTTPS
+            // Isso resolve o erro de mismatch causado pelo proxy reverso (Nginx)
+            const callbackUrl = new URL(request.url);
+            if (logtoConfig.baseUrl?.startsWith('https')) {
+                callbackUrl.protocol = 'https:';
+            }
+
+            console.log('Processed Callback URL:', callbackUrl.toString());
+            await handleSignIn(logtoConfig, callbackUrl);
             return;
         }
 
