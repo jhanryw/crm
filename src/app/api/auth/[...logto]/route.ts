@@ -10,19 +10,19 @@ export async function GET(request: NextRequest) {
     const action = pathname.split('/').pop();
 
     try {
+        console.log('--- LOGTO AUTH ATTEMPT ---');
+        console.log('Action:', action);
+        console.log('Endpoint:', logtoConfig.endpoint);
+        console.log('Base URL:', logtoConfig.baseUrl);
+        console.log('Node Version:', process.version);
+        console.log('NODE_OPTIONS:', process.env.NODE_OPTIONS);
+
         if (action === 'sign-in') {
-            console.log('Logto Config Check:', {
-                endpoint: logtoConfig.endpoint,
-                appId: logtoConfig.appId,
-                baseUrl: logtoConfig.baseUrl,
-                cookieSecure: logtoConfig.cookieSecure,
-                hasSecret: !!logtoConfig.appSecret,
-                hasCookieSecret: !!logtoConfig.cookieSecret
-            });
-            console.log('SignIn Redirect URI:', `${logtoConfig.baseUrl}/api/auth/sign-in-callback`);
+            const redirectUri = `${logtoConfig.baseUrl}/api/auth/sign-in-callback`;
+            console.log('Target Redirect URI:', redirectUri);
 
             await signIn(logtoConfig, {
-                redirectUri: `${logtoConfig.baseUrl}/api/auth/sign-in-callback`,
+                redirectUri,
             });
             return;
         }
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
         if (action === 'sign-in-callback') {
             console.log('Handling Callback URL:', request.url);
             await handleSignIn(logtoConfig, new URL(request.url));
-            return; // handleSignIn redirects internally
+            return;
         }
 
         if (action === 'sign-out') {
@@ -42,11 +42,19 @@ export async function GET(request: NextRequest) {
             throw error;
         }
 
-        console.error('Logto Auth Error Full:', error);
+        console.error('--- LOGTO ERROR DETAILS ---');
+        console.error('Message:', error.message);
+        console.error('Cause:', error.cause);
+        if (error.cause) {
+            console.error('Cause Details:', JSON.stringify(error.cause));
+        }
+        console.error('Stack:', error.stack);
+
         return NextResponse.json({
             error: 'Auth failed',
             details: error.message,
-            stack: error.stack,
+            cause: error.cause,
+            hint: 'Check if LOGTO_ENDPOINT is reachable from inside the container',
         }, { status: 500 });
     }
 
