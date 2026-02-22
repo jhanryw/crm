@@ -67,13 +67,15 @@ export default function Sidebar({ user }: SidebarProps) {
                     <span className="font-medium">Configurações</span>
                 </Link>
 
-                <a
-                    href="/api/auth/sign-out"
-                    className="flex items-center space-x-3 px-4 py-3 rounded-lg text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
+                <button
+                    onClick={() => {
+                        import('@/app/actions/auth').then(m => m.signOutAction());
+                    }}
+                    className="w-full flex items-center space-x-3 px-4 py-3 rounded-lg text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors"
                 >
                     <LogOut className="w-5 h-5" />
                     <span className="font-medium">Sair</span>
-                </a>
+                </button>
             </div>
         </aside>
     );

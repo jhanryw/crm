@@ -11,7 +11,7 @@ export default async function AuthenticatedLayout({
     const { isAuthenticated, claims } = await getLogtoContext(logtoConfig);
 
     if (!isAuthenticated) {
-        redirect('/api/auth/sign-in');
+        redirect('/sign-in');
     }
 
     return (

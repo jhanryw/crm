@@ -2,18 +2,21 @@
 
 type Props = {
   onSignIn: () => Promise<void>;
+  className?: string;
 };
 
-const SignIn = ({ onSignIn }: Props) => {
+const SignIn = ({ onSignIn, className }: Props) => {
   return (
     <button
+      className={className}
       onClick={() => {
         onSignIn();
       }}
     >
-      Sign In
+      Entrar com Logto
     </button>
   );
 };
+
 
 export default SignIn;
