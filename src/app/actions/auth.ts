@@ -4,7 +4,9 @@ import { signIn as logtoSignIn, signOut as logtoSignOut } from '@logto/next/serv
 import { logtoConfig } from '@/lib/auth/logto';
 
 export async function signInAction() {
-    await logtoSignIn(logtoConfig);
+    await logtoSignIn(logtoConfig, {
+        redirectUri: `${logtoConfig.baseUrl}/api/auth/sign-in-callback`
+    });
 }
 
 export async function signOutAction() {

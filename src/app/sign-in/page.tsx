@@ -1,6 +1,5 @@
-import { signIn } from '@logto/next/server-actions';
 import SignInButton from '@/components/auth/SignIn';
-import { logtoConfig } from '@/lib/auth/logto';
+import { signInAction } from '@/app/actions/auth';
 
 export default function SignInPage() {
     return (
@@ -20,10 +19,7 @@ export default function SignInPage() {
 
                 <SignInButton
                     className="w-full px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-lg shadow-xl shadow-blue-600/20 transition-all transform hover:-translate-y-1"
-                    onSignIn={async () => {
-                        'use server';
-                        await signIn(logtoConfig);
-                    }}
+                    onSignIn={signInAction}
                 />
             </div>
         </div>

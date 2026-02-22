@@ -1,7 +1,7 @@
 import { UserScope, LogtoNextConfig } from '@logto/next';
 
 export const logtoConfig: LogtoNextConfig = {
-    endpoint: (process.env.LOGTO_ENDPOINT || 'https://crm-logto.vodct5.easypanel.host/oidc').replace(/\/$/, ''),
+    endpoint: (process.env.LOGTO_ENDPOINT || 'https://crm-logto.vodct5.easypanel.host').replace(/\/oidc\/?$/, '').replace(/\/$/, ''),
     appId: '73jkkm3hsueix2pnh9i2z',
     appSecret: 'AT8OL96Cg1s96QljKJtYuwWH4jgWPKDn',
     baseUrl: (process.env.NEXT_PUBLIC_APP_URL || 'https://crm-crm.vodct5.easypanel.host').replace(/\/$/, ''),
