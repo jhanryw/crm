@@ -7,9 +7,10 @@ import { revalidatePath } from 'next/cache';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-// Using service key because RLS with Logto in server actions needs manual jwt passing if we use anon key, 
-// but service key bypasses RLS. We'll verify auth manually.
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || '';
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
 
 async function requireAuth() {
     const { isAuthenticated, claims } = await getLogtoContext(logtoConfig);
@@ -17,7 +18,6 @@ async function requireAuth() {
         throw new Error("Unauthorized");
     }
 
-    // Get user's org
     const { data: user } = await supabase
         .from('users')
         .select('organization_id, role')
@@ -29,7 +29,7 @@ async function requireAuth() {
     return { logtoId: claims.sub, orgId: user.organization_id, role: user.role };
 }
 
-// ORGANIZATIONS & INTEGRATIONS
+// INTEGRATIONS
 export async function getIntegrations() {
     const { orgId } = await requireAuth();
     const { data } = await supabase.from('integrations').select('*').eq('organization_id', orgId);
@@ -40,27 +40,80 @@ export async function connectWhatsApp() {
     const { orgId, role } = await requireAuth();
     if (role === 'salesperson') throw new Error("Unauthorized");
 
-    // Stub: create a pending integration for whatsapp.
-    // In a real scenario, this would trigger an Evolution API create instance endpoint to get the QR code.
+    if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) {
+        throw new Error("Evolution API não configurada. Adicione EVOLUTION_API_URL e EVOLUTION_API_KEY no .env.");
+    }
+
+    const instanceName = `qarvon-${orgId.slice(0, 8)}`;
+
+    // 1. Criar instância (ignora erro se já existir)
+    await fetch(`${EVOLUTION_API_URL}/instance/create`, {
+        method: 'POST',
+        headers: { 'apikey': EVOLUTION_API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
+    }).catch(() => null);
+
+    // 2. Obter QR code
+    const qrRes = await fetch(`${EVOLUTION_API_URL}/instance/connect/${instanceName}`, {
+        headers: { 'apikey': EVOLUTION_API_KEY },
+    });
+
+    if (!qrRes.ok) {
+        throw new Error(`Evolution API erro ao gerar QR: ${qrRes.status}`);
+    }
+
+    const qrData = await qrRes.json();
+    // Evolution API v2 retorna { code: "base64..." } ou { qrcode: { base64: "..." } }
+    const qrBase64 = qrData.base64 || qrData.qrcode?.base64 || qrData.code || null;
+
     const { data, error } = await supabase
         .from('integrations')
-        .upsert({ organization_id: orgId, channel: 'whatsapp', status: 'connecting', config: { qrCode: "simulated_qr_code" } }, { onConflict: 'organization_id, channel' })
+        .upsert(
+            { organization_id: orgId, channel: 'whatsapp', status: 'connecting', config: { instanceName, qrCode: qrBase64 } },
+            { onConflict: 'organization_id, channel' }
+        )
         .select()
         .single();
 
     if (error) throw new Error(error.message);
     revalidatePath('/settings');
-    return data;
+    return { ...data, qrBase64 };
 }
 
 export async function connectInstagram(username: string, password: string) {
     const { orgId, role } = await requireAuth();
     if (role === 'salesperson') throw new Error("Unauthorized");
+    if (!username || !password) throw new Error("Usuário e senha são obrigatórios");
 
-    // Stub: simulate connecting instagram
+    let sessionData: string | null = null;
+
+    try {
+        // Importação dinâmica para evitar problemas de SSR
+        const { IgApiClient } = await import('instagram-private-api');
+        const ig = new IgApiClient();
+        ig.state.generateDevice(username);
+        await ig.account.login(username, password);
+        const serialized = await ig.state.serialize();
+        // Remover cookies de mídia que podem ser muito grandes
+        delete serialized.constants;
+        sessionData = JSON.stringify(serialized);
+    } catch (err: any) {
+        const msg = err?.message || 'Erro desconhecido';
+        if (msg.includes('challenge')) {
+            throw new Error("Instagram solicitou verificação (2FA/challenge). Desative o 2FA ou use uma conta sem verificação em duas etapas.");
+        }
+        if (msg.includes('Bad Password') || msg.includes('password')) {
+            throw new Error("Usuário ou senha incorretos.");
+        }
+        throw new Error(`Erro ao conectar Instagram: ${msg}`);
+    }
+
     const { data, error } = await supabase
         .from('integrations')
-        .upsert({ organization_id: orgId, channel: 'instagram', status: 'connected', config: { username } }, { onConflict: 'organization_id, channel' })
+        .upsert(
+            { organization_id: orgId, channel: 'instagram', status: 'connected', config: { username, session: sessionData } },
+            { onConflict: 'organization_id, channel' }
+        )
         .select()
         .single();
 
@@ -72,7 +125,7 @@ export async function connectInstagram(username: string, password: string) {
 // ORIGINS
 export async function getOrigins() {
     const { orgId } = await requireAuth();
-    const { data } = await supabase.from('lead_origins').select('*').eq('organization_id', orgId);
+    const { data } = await supabase.from('lead_origins').select('*').eq('organization_id', orgId).order('created_at', { ascending: true });
     return data || [];
 }
 
@@ -82,7 +135,7 @@ export async function addOrigin(name: string, regex: string) {
 
     const { error } = await supabase
         .from('lead_origins')
-        .insert({ organization_id: orgId, name, auto_match_regex: regex });
+        .insert({ organization_id: orgId, name, auto_match_regex: regex || null });
     if (error) throw new Error(error.message);
     revalidatePath('/settings');
 }

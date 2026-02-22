@@ -9,6 +9,9 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
+const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || '';
+const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
+
 async function requireAuth() {
     const { isAuthenticated, claims } = await getLogtoContext(logtoConfig);
     if (!isAuthenticated || !claims?.sub) {
@@ -51,28 +54,98 @@ export async function sendMessage(conversationId: string, text: string) {
 
     const { data: conv } = await supabase
         .from('inbox_conversations')
-        .select('channel, contact_id')
+        .select('channel, contact_id, organization_id')
         .eq('id', conversationId)
+        .eq('organization_id', orgId)
         .single();
 
-    if (!conv) throw new Error("Conversation not found");
+    if (!conv) throw new Error("Conversa não encontrada");
 
-    // Simulando disparo para o contato (ex: via Evolution API ou Instagram Graph API)...
-    // No ambiente real, faríamos um POST para envio de mensagem aqui.
-    console.log(`[MVP] Disparando mensagem via ${conv.channel} para ${conv.contact_id}: ${text}`);
+    // Enviar via canal correto
+    if (conv.channel === 'whatsapp') {
+        await sendWhatsAppMessage(orgId, conv.contact_id, text);
+    } else if (conv.channel === 'instagram') {
+        await sendInstagramMessage(orgId, conv.contact_id, text);
+    }
 
-    const { error } = await supabase
-        .from('messages')
-        .insert({
-            organization_id: orgId,
-            conversation_id: conversationId,
-            direction: 'out',
-            body: text
-        });
+    // Salvar mensagem enviada no banco
+    const { error } = await supabase.from('messages').insert({
+        organization_id: orgId,
+        conversation_id: conversationId,
+        direction: 'out',
+        body: text,
+    });
 
     if (error) throw new Error(error.message);
     revalidatePath('/inbox');
     return { success: true };
+}
+
+async function sendWhatsAppMessage(orgId: string, contactId: string, text: string) {
+    if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) {
+        console.warn('[WhatsApp] Evolution API não configurada — mensagem salva apenas no banco.');
+        return;
+    }
+
+    // Buscar instanceName da integração da org
+    const { data: integration } = await supabase
+        .from('integrations')
+        .select('config, status')
+        .eq('organization_id', orgId)
+        .eq('channel', 'whatsapp')
+        .single();
+
+    if (!integration || integration.status !== 'connected') {
+        throw new Error("WhatsApp não está conectado. Configure em Definições.");
+    }
+
+    const instanceName = integration.config?.instanceName;
+    if (!instanceName) throw new Error("instanceName não encontrado na configuração do WhatsApp.");
+
+    // Número no formato internacional sem o +
+    const number = contactId.replace(/\D/g, '');
+
+    const res = await fetch(`${EVOLUTION_API_URL}/message/sendText/${instanceName}`, {
+        method: 'POST',
+        headers: { 'apikey': EVOLUTION_API_KEY, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ number, text }),
+    });
+
+    if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`Erro ao enviar WhatsApp: ${err}`);
+    }
+}
+
+async function sendInstagramMessage(orgId: string, contactUsername: string, text: string) {
+    const { data: integration } = await supabase
+        .from('integrations')
+        .select('config, status')
+        .eq('organization_id', orgId)
+        .eq('channel', 'instagram')
+        .single();
+
+    if (!integration || integration.status !== 'connected') {
+        throw new Error("Instagram não está conectado. Configure em Definições.");
+    }
+
+    const sessionData = integration.config?.session;
+    if (!sessionData) throw new Error("Sessão do Instagram não encontrada.");
+
+    try {
+        const { IgApiClient } = await import('instagram-private-api');
+        const ig = new IgApiClient();
+        await ig.state.deserialize(JSON.parse(sessionData));
+
+        const users = await ig.user.search(contactUsername);
+        const recipient = users?.[0];
+        if (!recipient) throw new Error(`Usuário Instagram não encontrado: ${contactUsername}`);
+
+        const thread = ig.entity.directThread([recipient.pk.toString()]);
+        await thread.broadcastText(text);
+    } catch (err: any) {
+        throw new Error(`Erro ao enviar Instagram: ${err.message}`);
+    }
 }
 
 export async function approveConversationAsLead(conversationId: string) {
@@ -82,11 +155,11 @@ export async function approveConversationAsLead(conversationId: string) {
         .from('inbox_conversations')
         .select('*')
         .eq('id', conversationId)
+        .eq('organization_id', orgId)
         .single();
 
-    if (!conv) throw new Error("Conversation not found");
+    if (!conv) throw new Error("Conversa não encontrada");
 
-    // Get the first stage
     const { data: stage } = await supabase
         .from('stages')
         .select('id')
@@ -97,24 +170,26 @@ export async function approveConversationAsLead(conversationId: string) {
 
     const originSource = conv.channel === 'whatsapp' ? 'WhatsApp' : 'Instagram';
 
-    // Create the lead
     const { data: newLead, error: leadErr } = await supabase
         .from('leads')
         .insert({
             organization_id: orgId,
             assigned_to: userId,
-            origin_id: conv.origin_id, // Atribui a mesma origem da conversa (pelo webhook)
+            origin_id: conv.origin_id,
             source: originSource,
-            stage_id: stage?.id || null, // Pipeline stage
-            contact_name: conv.contact_id // MVP: using phone or ID as name initially
+            stage_id: stage?.id || null,
+            contact_name: conv.contact_id,
+            contact_phone: conv.channel === 'whatsapp' ? conv.contact_id : null,
         })
         .select()
         .single();
 
     if (leadErr) throw new Error(leadErr.message);
 
-    // Update conversation to active
-    await supabase.from('inbox_conversations').update({ status: 'active' }).eq('id', conversationId);
+    await supabase
+        .from('inbox_conversations')
+        .update({ status: 'active', updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
 
     revalidatePath('/inbox');
     revalidatePath('/kanban');
@@ -123,6 +198,10 @@ export async function approveConversationAsLead(conversationId: string) {
 
 export async function archiveConversation(conversationId: string) {
     const { orgId } = await requireAuth();
-    await supabase.from('inbox_conversations').update({ status: 'archived' }).eq('id', conversationId).eq('organization_id', orgId);
+    await supabase
+        .from('inbox_conversations')
+        .update({ status: 'archived', updated_at: new Date().toISOString() })
+        .eq('id', conversationId)
+        .eq('organization_id', orgId);
     revalidatePath('/inbox');
 }
