@@ -1,7 +1,7 @@
 import './globals.css';
-import { Inter } from 'next/font/google';
+import { Helvetica } from 'next/font/google';
 
-const inter = Inter({ subsets: ['latin'] });
+const inter = Helvetica({ subsets: ['latin'] });
 
 export const metadata = {
     title: 'Qarvon CRM',

@@ -1,10 +1,15 @@
-export default function SettingsPage() {
+import { getIntegrations, getOrigins } from '@/app/actions/settings';
+import SettingsClient from './SettingsClient';
+
+export default async function SettingsPage() {
+    const integrations = await getIntegrations();
+    const origins = await getOrigins();
+
     return (
-        <div className="space-y-6">
-            <h2 className="text-3xl font-bold text-gray-800">Settings</h2>
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                <p className="text-gray-500">System settings.</p>
-            </div>
+        <div className="max-w-4xl mx-auto space-y-6">
+            <h2 className="text-3xl font-bold text-gray-800">Definições da Conta</h2>
+            <SettingsClient initialIntegrations={integrations} initialOrigins={origins} />
         </div>
     );
 }
+

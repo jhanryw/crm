@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 :root {
-  --qarvon-primary: #00A86B;
+  --qarvon-primary: #00a86b;
   /* ajuste se tiver o verde oficial */
   --qarvon-primary-dark: #008F5A;
   --qarvon-primary-light: #E6F7F1;
