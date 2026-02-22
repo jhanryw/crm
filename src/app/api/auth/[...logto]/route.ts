@@ -10,6 +10,7 @@ export async function GET(request: NextRequest) {
 
     try {
         if (action === 'sign-in') {
+            console.log('Iniciando Sign-In com appId:', logtoConfig.appId);
             return await signIn(logtoConfig, {
                 redirectUri: `${logtoConfig.baseUrl}/api/auth/sign-in-callback`,
             });
@@ -17,7 +18,6 @@ export async function GET(request: NextRequest) {
 
         if (action === 'sign-in-callback') {
             const url = new URL(request.url);
-            // Criamos a URL de callback absoluta para bater com a do Logto Admin
             const callbackUrl = new URL(logtoConfig.baseUrl);
             callbackUrl.pathname = '/api/auth/sign-in-callback';
             callbackUrl.search = url.search;
