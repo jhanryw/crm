@@ -1,43 +1,16 @@
 'use server';
 
-import { createClient } from '@supabase/supabase-js';
-import { getLogtoContext } from '@logto/next/server-actions';
-import { logtoConfig } from '@/lib/auth/logto';
 import { revalidatePath } from 'next/cache';
+import { requireAuth, getServiceSupabase } from '@/lib/auth/server';
 
-function getSupabase() {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !key) throw new Error('Supabase não configurado. Adicione NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no EasyPanel.');
-    return createClient(url, key);
-}
-
-async function requireAuth() {
-    const { isAuthenticated, claims } = await getLogtoContext(logtoConfig);
-    if (!isAuthenticated || !claims?.sub) {
-        throw new Error('Sessão expirada. Faça login novamente.');
-    }
-
-    const { data: user } = await getSupabase()
-        .from('users')
-        .select('organization_id, role')
-        .eq('logto_id', claims.sub)
-        .single();
-
-    if (!user) throw new Error('Usuário não encontrado no banco. Execute o setup inicial do banco de dados.');
-
-    return { logtoId: claims.sub, orgId: user.organization_id, role: user.role };
-}
-
-// INTEGRATIONS
 export async function getIntegrations() {
     const { orgId } = await requireAuth();
-    const { data } = await getSupabase().from('integrations').select('*').eq('organization_id', orgId);
+    const { data } = await getServiceSupabase().from('integrations').select('*').eq('organization_id', orgId);
     return data || [];
 }
 
 export async function connectWhatsApp(): Promise<
-    { success: true; qrBase64: string | null;[key: string]: any } |
+    { success: true; qrBase64: string | null; [key: string]: any } |
     { success: false; error: string }
 > {
     try {
@@ -53,14 +26,12 @@ export async function connectWhatsApp(): Promise<
 
         const instanceName = `qarvon-${orgId.slice(0, 8)}`;
 
-        // 1. Criar instância (ignora erro se já existir)
         await fetch(`${evolutionUrl}/instance/create`, {
             method: 'POST',
             headers: { 'apikey': evolutionKey, 'Content-Type': 'application/json' },
             body: JSON.stringify({ instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
         }).catch(() => null);
 
-        // 2. Obter QR code
         const qrRes = await fetch(`${evolutionUrl}/instance/connect/${instanceName}`, {
             headers: { 'apikey': evolutionKey },
         });
@@ -72,7 +43,7 @@ export async function connectWhatsApp(): Promise<
         const qrData = await qrRes.json();
         const qrBase64 = qrData.base64 || qrData.qrcode?.base64 || qrData.code || null;
 
-        const { data, error } = await getSupabase()
+        const { data, error } = await getServiceSupabase()
             .from('integrations')
             .upsert(
                 { organization_id: orgId, channel: 'whatsapp', status: 'connecting', config: { instanceName, qrCode: qrBase64 } },
@@ -91,7 +62,7 @@ export async function connectWhatsApp(): Promise<
 }
 
 export async function connectInstagram(username: string, password: string): Promise<
-    { success: true;[key: string]: any } |
+    { success: true; [key: string]: any } |
     { success: false; error: string }
 > {
     try {
@@ -112,16 +83,12 @@ export async function connectInstagram(username: string, password: string): Prom
             sessionData = JSON.stringify(serialized);
         } catch (err: any) {
             const msg = err?.message || 'Erro desconhecido';
-            if (msg.includes('challenge')) {
-                return { success: false, error: 'Instagram solicitou verificação (2FA). Desative o 2FA ou use outra conta.' };
-            }
-            if (msg.toLowerCase().includes('bad password') || msg.toLowerCase().includes('password')) {
-                return { success: false, error: 'Usuário ou senha incorretos.' };
-            }
+            if (msg.includes('challenge')) return { success: false, error: 'Instagram solicitou verificação (2FA). Desative o 2FA ou use outra conta.' };
+            if (msg.toLowerCase().includes('bad password') || msg.toLowerCase().includes('password')) return { success: false, error: 'Usuário ou senha incorretos.' };
             return { success: false, error: `Erro ao fazer login no Instagram: ${msg}` };
         }
 
-        const { data, error } = await getSupabase()
+        const { data, error } = await getServiceSupabase()
             .from('integrations')
             .upsert(
                 { organization_id: orgId, channel: 'instagram', status: 'connected', config: { username, session: sessionData } },
@@ -142,30 +109,52 @@ export async function connectInstagram(username: string, password: string): Prom
 // ORIGINS
 export async function getOrigins() {
     const { orgId } = await requireAuth();
-    const { data } = await getSupabase().from('lead_origins').select('*').eq('organization_id', orgId).order('created_at', { ascending: true });
+    const { data } = await getServiceSupabase()
+        .from('lead_origins')
+        .select('*')
+        .eq('organization_id', orgId)
+        .order('created_at', { ascending: true });
     return data || [];
 }
 
-export async function addOrigin(name: string, regex: string) {
-    const { orgId, role } = await requireAuth();
-    if (role === 'salesperson') throw new Error('Sem permissão para adicionar origens.');
+export async function addOrigin(name: string, regex: string): Promise<
+    { success: true } | { success: false; error: string }
+> {
+    try {
+        const { orgId, role } = await requireAuth();
+        if (role === 'salesperson') return { success: false, error: 'Sem permissão para adicionar origens.' };
 
-    const { error } = await getSupabase()
-        .from('lead_origins')
-        .insert({ organization_id: orgId, name, auto_match_regex: regex || null });
-    if (error) throw new Error(error.message);
-    revalidatePath('/settings');
+        const { error } = await getServiceSupabase()
+            .from('lead_origins')
+            .insert({ organization_id: orgId, name, auto_match_regex: regex || null });
+
+        if (error) return { success: false, error: error.message };
+
+        revalidatePath('/settings');
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e?.message || 'Erro ao adicionar origem.' };
+    }
 }
 
-export async function deleteOrigin(id: string) {
-    const { orgId, role } = await requireAuth();
-    if (role === 'salesperson') throw new Error('Sem permissão para excluir origens.');
+export async function deleteOrigin(id: string): Promise<
+    { success: true } | { success: false; error: string }
+> {
+    try {
+        const { orgId, role } = await requireAuth();
+        if (role === 'salesperson') return { success: false, error: 'Sem permissão para excluir origens.' };
 
-    const { error } = await getSupabase()
-        .from('lead_origins')
-        .delete()
-        .eq('id', id)
-        .eq('organization_id', orgId);
-    if (error) throw new Error(error.message);
-    revalidatePath('/settings');
+        const { error } = await getServiceSupabase()
+            .from('lead_origins')
+            .delete()
+            .eq('id', id)
+            .eq('organization_id', orgId);
+
+        if (error) return { success: false, error: error.message };
+
+        revalidatePath('/settings');
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e?.message || 'Erro ao excluir origem.' };
+    }
 }

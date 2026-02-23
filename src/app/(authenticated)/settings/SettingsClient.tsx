@@ -17,6 +17,7 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
     const [igPass, setIgPass] = useState('');
     const [igLoading, setIgLoading] = useState(false);
     const [igError, setIgError] = useState('');
+    const [originError, setOriginError] = useState('');
     const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const whatsappIntegration = integrations.find((i: any) => i.channel === 'whatsapp');
@@ -80,24 +81,26 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
 
     const handleAddOrigin = async (e: React.FormEvent) => {
         e.preventDefault();
-        try {
-            await addOrigin(originName, originRegex);
-            setOrigins((prev: any[]) => [...prev, { id: Date.now(), name: originName, auto_match_regex: originRegex || null }]);
-            setOriginName('');
-            setOriginRegex('');
-        } catch (e: any) {
-            alert(e.message);
+        setOriginError('');
+        const result = await addOrigin(originName, originRegex);
+        if (!result.success) {
+            setOriginError(result.error);
+            return;
         }
+        setOrigins((prev: any[]) => [...prev, { id: Date.now(), name: originName, auto_match_regex: originRegex || null }]);
+        setOriginName('');
+        setOriginRegex('');
     };
 
     const handleDeleteOrigin = async (id: string) => {
         if (!confirm('Tem certeza que deseja excluir esta origem?')) return;
-        try {
-            await deleteOrigin(id);
-            setOrigins((prev: any[]) => prev.filter(o => o.id !== id));
-        } catch (e: any) {
-            alert(e.message);
+        setOriginError('');
+        const result = await deleteOrigin(id);
+        if (!result.success) {
+            setOriginError(result.error);
+            return;
         }
+        setOrigins((prev: any[]) => prev.filter(o => o.id !== id));
     };
 
     const statusBadge = (status?: string) => {
@@ -263,6 +266,7 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
                         </button>
                     </form>
 
+                    {originError && <p className="text-red-500 text-xs bg-red-50 p-2 rounded border border-red-200 mb-4">{originError}</p>}
                     <div className="overflow-x-auto rounded-lg border border-gray-100">
                         <table className="w-full text-left text-sm">
                             <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">

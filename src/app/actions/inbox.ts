@@ -1,39 +1,14 @@
 'use server';
 
-import { createClient } from '@supabase/supabase-js';
-import { getLogtoContext } from '@logto/next/server-actions';
-import { logtoConfig } from '@/lib/auth/logto';
+import { requireAuth, getServiceSupabase } from '@/lib/auth/server';
 import { revalidatePath } from 'next/cache';
-
-function getSupabase() {
-    return createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
-}
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || '';
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
 
-async function requireAuth() {
-    const { isAuthenticated, claims } = await getLogtoContext(logtoConfig);
-    if (!isAuthenticated || !claims?.sub) {
-        throw new Error("Unauthorized");
-    }
-
-    const { data: user } = await getSupabase()
-        .from('users')
-        .select('organization_id, role, id')
-        .eq('logto_id', claims.sub)
-        .single();
-
-    if (!user) throw new Error("User org not found");
-    return { logtoId: claims.sub, orgId: user.organization_id, role: user.role, userId: user.id };
-}
-
 export async function getConversations() {
     const { orgId } = await requireAuth();
-    const { data } = await getSupabase()
+    const { data } = await getServiceSupabase()
         .from('inbox_conversations')
         .select('*, lead_origins(name), leads(*)')
         .eq('organization_id', orgId)
@@ -43,7 +18,7 @@ export async function getConversations() {
 
 export async function getMessages(conversationId: string) {
     const { orgId } = await requireAuth();
-    const { data } = await getSupabase()
+    const { data } = await getServiceSupabase()
         .from('messages')
         .select('*')
         .eq('organization_id', orgId)
@@ -55,7 +30,7 @@ export async function getMessages(conversationId: string) {
 export async function sendMessage(conversationId: string, text: string) {
     const { orgId } = await requireAuth();
 
-    const { data: conv } = await getSupabase()
+    const { data: conv } = await getServiceSupabase()
         .from('inbox_conversations')
         .select('channel, contact_id, organization_id')
         .eq('id', conversationId)
@@ -72,7 +47,7 @@ export async function sendMessage(conversationId: string, text: string) {
     }
 
     // Salvar mensagem enviada no banco
-    const { error } = await getSupabase().from('messages').insert({
+    const { error } = await getServiceSupabase().from('messages').insert({
         organization_id: orgId,
         conversation_id: conversationId,
         direction: 'out',
@@ -91,7 +66,7 @@ async function sendWhatsAppMessage(orgId: string, contactId: string, text: strin
     }
 
     // Buscar instanceName da integração da org
-    const { data: integration } = await getSupabase()
+    const { data: integration } = await getServiceSupabase()
         .from('integrations')
         .select('config, status')
         .eq('organization_id', orgId)
@@ -121,7 +96,7 @@ async function sendWhatsAppMessage(orgId: string, contactId: string, text: strin
 }
 
 async function sendInstagramMessage(orgId: string, contactUsername: string, text: string) {
-    const { data: integration } = await getSupabase()
+    const { data: integration } = await getServiceSupabase()
         .from('integrations')
         .select('config, status')
         .eq('organization_id', orgId)
@@ -156,7 +131,7 @@ async function sendInstagramMessage(orgId: string, contactUsername: string, text
 export async function approveConversationAsLead(conversationId: string) {
     const { orgId, userId } = await requireAuth();
 
-    const { data: conv } = await getSupabase()
+    const { data: conv } = await getServiceSupabase()
         .from('inbox_conversations')
         .select('*')
         .eq('id', conversationId)
@@ -165,7 +140,7 @@ export async function approveConversationAsLead(conversationId: string) {
 
     if (!conv) throw new Error("Conversa não encontrada");
 
-    const { data: stage } = await getSupabase()
+    const { data: stage } = await getServiceSupabase()
         .from('stages')
         .select('id')
         .eq('organization_id', orgId)
@@ -175,7 +150,7 @@ export async function approveConversationAsLead(conversationId: string) {
 
     const originSource = conv.channel === 'whatsapp' ? 'WhatsApp' : 'Instagram';
 
-    const { data: newLead, error: leadErr } = await getSupabase()
+    const { data: newLead, error: leadErr } = await getServiceSupabase()
         .from('leads')
         .insert({
             organization_id: orgId,
@@ -191,7 +166,7 @@ export async function approveConversationAsLead(conversationId: string) {
 
     if (leadErr) throw new Error(leadErr.message);
 
-    await getSupabase()
+    await getServiceSupabase()
         .from('inbox_conversations')
         .update({ status: 'active', updated_at: new Date().toISOString() })
         .eq('id', conversationId);
@@ -203,7 +178,7 @@ export async function approveConversationAsLead(conversationId: string) {
 
 export async function archiveConversation(conversationId: string) {
     const { orgId } = await requireAuth();
-    await getSupabase()
+    await getServiceSupabase()
         .from('inbox_conversations')
         .update({ status: 'archived', updated_at: new Date().toISOString() })
         .eq('id', conversationId)
