@@ -22,7 +22,12 @@ export function getServiceSupabase() {
 
 function fmtErr(e: any): string {
     if (!e) return 'sem erro retornado';
-    return e.message || e.details || e.hint || e.code || JSON.stringify(e);
+    const msg = e.message || e.details || e.hint || e.code;
+    if (msg) return msg;
+    // Empty error object {} usually means the table doesn't exist or connection failed
+    const str = JSON.stringify(e);
+    if (str === '{}') return 'tabela não encontrada — execute as migrations no Supabase (SQL Editor)';
+    return str;
 }
 
 export async function requireAuth() {
