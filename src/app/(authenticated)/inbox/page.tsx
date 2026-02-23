@@ -9,10 +9,11 @@ async function getOrgId(): Promise<string | null> {
         const { isAuthenticated, claims } = await getLogtoContext(logtoConfig);
         if (!isAuthenticated || !claims?.sub) return null;
 
-        const supabase = createClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.SUPABASE_SERVICE_ROLE_KEY!
-        );
+        const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+        if (!url || !key) return null;
+
+        const supabase = createClient(url, key);
         const { data: user } = await supabase
             .from('users')
             .select('organization_id')
@@ -26,8 +27,8 @@ async function getOrgId(): Promise<string | null> {
 }
 
 export default async function InboxPage() {
-    const [conversations, orgId] = await Promise.all([
-        getConversations(),
+    const [conversationsResult, orgId] = await Promise.all([
+        getConversations().catch(() => []),
         getOrgId(),
     ]);
 
@@ -37,7 +38,7 @@ export default async function InboxPage() {
                 <h2 className="text-3xl font-bold text-gray-800">Inbox</h2>
                 <span className="text-sm text-gray-500">WhatsApp + Instagram unificados</span>
             </div>
-            <InboxClient initialConversations={conversations} orgId={orgId || ''} />
+            <InboxClient initialConversations={conversationsResult} orgId={orgId || ''} />
         </div>
     );
 }
