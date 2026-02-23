@@ -15,7 +15,14 @@ export function getServiceSupabase() {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !key) throw new Error('Supabase não configurado. Adicione NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no EasyPanel.');
-    return createClient(url, key);
+    return createClient(url, key, {
+        auth: { persistSession: false },
+    });
+}
+
+function fmtErr(e: any): string {
+    if (!e) return 'sem erro retornado';
+    return e.message || e.details || e.hint || e.code || JSON.stringify(e);
 }
 
 export async function requireAuth() {
@@ -26,12 +33,17 @@ export async function requireAuth() {
 
     const supabase = getServiceSupabase();
 
-    // Try to find existing user
-    const { data: existingUser } = await supabase
+    // Try to find existing user — also capture lookup errors
+    const { data: existingUser, error: lookupErr } = await supabase
         .from('users')
         .select('id, organization_id, role')
         .eq('logto_id', claims.sub)
         .maybeSingle();
+
+    if (lookupErr) {
+        console.error('[requireAuth] Erro ao buscar usuário no banco:', fmtErr(lookupErr));
+        throw new Error(`Erro ao buscar usuário: ${fmtErr(lookupErr)}`);
+    }
 
     if (existingUser) {
         return {
@@ -42,41 +54,49 @@ export async function requireAuth() {
         };
     }
 
-    // First time — auto-provision org + user + stages
+    // ── First time: auto-provision org + user + stages ──────────────────────
     const email = (claims.email as string | undefined) || `user-${claims.sub.slice(0, 8)}@app.local`;
     const orgName = (claims.name as string | undefined) || email.split('@')[0];
 
-    const { data: org, error: orgErr } = await supabase
+    // Generate UUIDs in JS so we never depend on .select().single() after insert
+    const orgId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
+
+    // 1. Create organization
+    const { error: orgErr } = await supabase
         .from('organizations')
-        .insert({ name: orgName })
-        .select('id')
-        .single();
+        .insert({ id: orgId, name: orgName });
 
-    if (orgErr || !org) {
-        throw new Error(`Erro ao criar organização: ${orgErr?.message ?? 'desconhecido'}`);
+    if (orgErr) {
+        console.error('[requireAuth] Erro ao criar organização:', fmtErr(orgErr), orgErr);
+        throw new Error(`Erro ao criar organização: ${fmtErr(orgErr)}`);
     }
 
-    const { data: newUser, error: userErr } = await supabase
+    // 2. Create user
+    const { error: userErr } = await supabase
         .from('users')
-        .insert({ organization_id: org.id, role: 'admin', email, logto_id: claims.sub })
-        .select('id, organization_id, role')
-        .single();
+        .insert({ id: userId, organization_id: orgId, role: 'admin', email, logto_id: claims.sub });
 
-    if (userErr || !newUser) {
-        throw new Error(`Erro ao criar usuário: ${userErr?.message ?? 'desconhecido'}`);
+    if (userErr) {
+        console.error('[requireAuth] Erro ao criar usuário:', fmtErr(userErr), userErr);
+        throw new Error(`Erro ao criar usuário: ${fmtErr(userErr)}`);
     }
 
-    // Create default pipeline stages
-    await supabase
+    // 3. Create default pipeline stages (best-effort — don't fail if this errors)
+    const { error: stagesErr } = await supabase
         .from('stages')
-        .insert(DEFAULT_STAGES.map(s => ({ ...s, organization_id: org.id })));
+        .insert(DEFAULT_STAGES.map(s => ({ ...s, organization_id: orgId })));
 
-    console.log('[requireAuth] User auto-provisioned:', org.id, claims.sub);
+    if (stagesErr) {
+        console.warn('[requireAuth] Aviso: erro ao criar estágios padrão:', fmtErr(stagesErr));
+    }
+
+    console.log('[requireAuth] Usuário auto-provisionado:', orgId, claims.sub);
 
     return {
         logtoId: claims.sub,
-        orgId: newUser.organization_id,
-        role: newUser.role as string,
-        userId: newUser.id,
+        orgId,
+        role: 'admin',
+        userId,
     };
 }
