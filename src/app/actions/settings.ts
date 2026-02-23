@@ -93,7 +93,8 @@ export async function connectInstagram(username: string, password: string) {
         const ig = new IgApiClient();
         ig.state.generateDevice(username);
         await ig.account.login(username, password);
-        const serialized = await ig.state.serialize();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const serialized: any = await ig.state.serialize();
         // Remover cookies de mídia que podem ser muito grandes
         delete serialized.constants;
         sessionData = JSON.stringify(serialized);
