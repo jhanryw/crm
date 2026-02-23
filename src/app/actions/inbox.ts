@@ -137,11 +137,13 @@ async function sendInstagramMessage(orgId: string, contactUsername: string, text
         const ig = new IgApiClient();
         await ig.state.deserialize(JSON.parse(sessionData));
 
-        const users = await ig.user.search(contactUsername);
-        const recipient = users?.[0];
+        // ig.user.search() returns UserRepositorySearchResponseRootObject { users: User[] }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const searchResult: any = await ig.user.search(contactUsername);
+        const recipient = searchResult?.users?.[0] ?? searchResult?.[0];
         if (!recipient) throw new Error(`Usuário Instagram não encontrado: ${contactUsername}`);
 
-        const thread = ig.entity.directThread([recipient.pk.toString()]);
+        const thread = ig.entity.directThread([String(recipient.pk)]);
         await thread.broadcastText(text);
     } catch (err: any) {
         throw new Error(`Erro ao enviar Instagram: ${err.message}`);
