@@ -6,19 +6,16 @@ import { logtoConfig } from '@/lib/auth/logto';
 import { revalidatePath } from 'next/cache';
 
 function getSupabase() {
-    return createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) throw new Error('Supabase não configurado. Adicione NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no EasyPanel.');
+    return createClient(url, key);
 }
-
-const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || '';
-const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
 
 async function requireAuth() {
     const { isAuthenticated, claims } = await getLogtoContext(logtoConfig);
     if (!isAuthenticated || !claims?.sub) {
-        throw new Error("Unauthorized");
+        throw new Error('Sessão expirada. Faça login novamente.');
     }
 
     const { data: user } = await getSupabase()
@@ -27,7 +24,7 @@ async function requireAuth() {
         .eq('logto_id', claims.sub)
         .single();
 
-    if (!user) throw new Error("User org not found");
+    if (!user) throw new Error('Usuário não encontrado no banco. Execute o setup inicial do banco de dados.');
 
     return { logtoId: claims.sub, orgId: user.organization_id, role: user.role };
 }
@@ -39,91 +36,107 @@ export async function getIntegrations() {
     return data || [];
 }
 
-export async function connectWhatsApp() {
-    const { orgId, role } = await requireAuth();
-    if (role === 'salesperson') throw new Error("Unauthorized");
+export async function connectWhatsApp(): Promise<
+    { success: true; qrBase64: string | null;[key: string]: any } |
+    { success: false; error: string }
+> {
+    try {
+        const { orgId, role } = await requireAuth();
+        if (role === 'salesperson') return { success: false, error: 'Sem permissão para configurar integrações.' };
 
-    if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) {
-        throw new Error("Evolution API não configurada. Adicione EVOLUTION_API_URL e EVOLUTION_API_KEY no .env.");
+        const evolutionUrl = process.env.EVOLUTION_API_URL || '';
+        const evolutionKey = process.env.EVOLUTION_API_KEY || '';
+
+        if (!evolutionUrl || !evolutionKey) {
+            return { success: false, error: 'Evolution API não configurada. Adicione EVOLUTION_API_URL e EVOLUTION_API_KEY no EasyPanel.' };
+        }
+
+        const instanceName = `qarvon-${orgId.slice(0, 8)}`;
+
+        // 1. Criar instância (ignora erro se já existir)
+        await fetch(`${evolutionUrl}/instance/create`, {
+            method: 'POST',
+            headers: { 'apikey': evolutionKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
+        }).catch(() => null);
+
+        // 2. Obter QR code
+        const qrRes = await fetch(`${evolutionUrl}/instance/connect/${instanceName}`, {
+            headers: { 'apikey': evolutionKey },
+        });
+
+        if (!qrRes.ok) {
+            return { success: false, error: `Evolution API erro ${qrRes.status}. Verifique se a URL e a chave estão corretas.` };
+        }
+
+        const qrData = await qrRes.json();
+        const qrBase64 = qrData.base64 || qrData.qrcode?.base64 || qrData.code || null;
+
+        const { data, error } = await getSupabase()
+            .from('integrations')
+            .upsert(
+                { organization_id: orgId, channel: 'whatsapp', status: 'connecting', config: { instanceName, qrCode: qrBase64 } },
+                { onConflict: 'organization_id, channel' }
+            )
+            .select()
+            .single();
+
+        if (error) return { success: false, error: `Erro ao salvar integração: ${error.message}` };
+
+        revalidatePath('/settings');
+        return { success: true, ...data, qrBase64 };
+    } catch (e: any) {
+        return { success: false, error: e?.message || 'Erro inesperado ao conectar WhatsApp.' };
     }
-
-    const instanceName = `qarvon-${orgId.slice(0, 8)}`;
-
-    // 1. Criar instância (ignora erro se já existir)
-    await fetch(`${EVOLUTION_API_URL}/instance/create`, {
-        method: 'POST',
-        headers: { 'apikey': EVOLUTION_API_KEY, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
-    }).catch(() => null);
-
-    // 2. Obter QR code
-    const qrRes = await fetch(`${EVOLUTION_API_URL}/instance/connect/${instanceName}`, {
-        headers: { 'apikey': EVOLUTION_API_KEY },
-    });
-
-    if (!qrRes.ok) {
-        throw new Error(`Evolution API erro ao gerar QR: ${qrRes.status}`);
-    }
-
-    const qrData = await qrRes.json();
-    // Evolution API v2 retorna { code: "base64..." } ou { qrcode: { base64: "..." } }
-    const qrBase64 = qrData.base64 || qrData.qrcode?.base64 || qrData.code || null;
-
-    const { data, error } = await getSupabase()
-        .from('integrations')
-        .upsert(
-            { organization_id: orgId, channel: 'whatsapp', status: 'connecting', config: { instanceName, qrCode: qrBase64 } },
-            { onConflict: 'organization_id, channel' }
-        )
-        .select()
-        .single();
-
-    if (error) throw new Error(error.message);
-    revalidatePath('/settings');
-    return { ...data, qrBase64 };
 }
 
-export async function connectInstagram(username: string, password: string) {
-    const { orgId, role } = await requireAuth();
-    if (role === 'salesperson') throw new Error("Unauthorized");
-    if (!username || !password) throw new Error("Usuário e senha são obrigatórios");
-
-    let sessionData: string | null = null;
-
+export async function connectInstagram(username: string, password: string): Promise<
+    { success: true;[key: string]: any } |
+    { success: false; error: string }
+> {
     try {
-        // Importação dinâmica para evitar problemas de SSR
-        const { IgApiClient } = await import('instagram-private-api');
-        const ig = new IgApiClient();
-        ig.state.generateDevice(username);
-        await ig.account.login(username, password);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const serialized: any = await ig.state.serialize();
-        // Remover cookies de mídia que podem ser muito grandes
-        delete serialized.constants;
-        sessionData = JSON.stringify(serialized);
-    } catch (err: any) {
-        const msg = err?.message || 'Erro desconhecido';
-        if (msg.includes('challenge')) {
-            throw new Error("Instagram solicitou verificação (2FA/challenge). Desative o 2FA ou use uma conta sem verificação em duas etapas.");
+        const { orgId, role } = await requireAuth();
+        if (role === 'salesperson') return { success: false, error: 'Sem permissão para configurar integrações.' };
+        if (!username || !password) return { success: false, error: 'Usuário e senha são obrigatórios.' };
+
+        let sessionData: string | null = null;
+
+        try {
+            const { IgApiClient } = await import('instagram-private-api');
+            const ig = new IgApiClient();
+            ig.state.generateDevice(username);
+            await ig.account.login(username, password);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const serialized: any = await ig.state.serialize();
+            delete serialized.constants;
+            sessionData = JSON.stringify(serialized);
+        } catch (err: any) {
+            const msg = err?.message || 'Erro desconhecido';
+            if (msg.includes('challenge')) {
+                return { success: false, error: 'Instagram solicitou verificação (2FA). Desative o 2FA ou use outra conta.' };
+            }
+            if (msg.toLowerCase().includes('bad password') || msg.toLowerCase().includes('password')) {
+                return { success: false, error: 'Usuário ou senha incorretos.' };
+            }
+            return { success: false, error: `Erro ao fazer login no Instagram: ${msg}` };
         }
-        if (msg.includes('Bad Password') || msg.includes('password')) {
-            throw new Error("Usuário ou senha incorretos.");
-        }
-        throw new Error(`Erro ao conectar Instagram: ${msg}`);
+
+        const { data, error } = await getSupabase()
+            .from('integrations')
+            .upsert(
+                { organization_id: orgId, channel: 'instagram', status: 'connected', config: { username, session: sessionData } },
+                { onConflict: 'organization_id, channel' }
+            )
+            .select()
+            .single();
+
+        if (error) return { success: false, error: `Erro ao salvar integração: ${error.message}` };
+
+        revalidatePath('/settings');
+        return { success: true, ...data };
+    } catch (e: any) {
+        return { success: false, error: e?.message || 'Erro inesperado ao conectar Instagram.' };
     }
-
-    const { data, error } = await getSupabase()
-        .from('integrations')
-        .upsert(
-            { organization_id: orgId, channel: 'instagram', status: 'connected', config: { username, session: sessionData } },
-            { onConflict: 'organization_id, channel' }
-        )
-        .select()
-        .single();
-
-    if (error) throw new Error(error.message);
-    revalidatePath('/settings');
-    return data;
 }
 
 // ORIGINS
@@ -135,7 +148,7 @@ export async function getOrigins() {
 
 export async function addOrigin(name: string, regex: string) {
     const { orgId, role } = await requireAuth();
-    if (role === 'salesperson') throw new Error("Unauthorized");
+    if (role === 'salesperson') throw new Error('Sem permissão para adicionar origens.');
 
     const { error } = await getSupabase()
         .from('lead_origins')
@@ -146,7 +159,7 @@ export async function addOrigin(name: string, regex: string) {
 
 export async function deleteOrigin(id: string) {
     const { orgId, role } = await requireAuth();
-    if (role === 'salesperson') throw new Error("Unauthorized");
+    if (role === 'salesperson') throw new Error('Sem permissão para excluir origens.');
 
     const { error } = await getSupabase()
         .from('lead_origins')

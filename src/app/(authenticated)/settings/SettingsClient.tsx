@@ -10,6 +10,7 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
     const [originName, setOriginName] = useState('');
     const [originRegex, setOriginRegex] = useState('');
     const [loadingWhatsapp, setLoadingWhatsapp] = useState(false);
+    const [waError, setWaError] = useState('');
     const [qrCode, setQrCode] = useState<string | null>(null);
     const [showIgLogin, setShowIgLogin] = useState(false);
     const [igUser, setIgUser] = useState('');
@@ -41,9 +42,12 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
 
     const handleConnectWhatsapp = async () => {
         setLoadingWhatsapp(true);
+        setWaError('');
         setQrCode(null);
-        try {
-            const result = await connectWhatsApp();
+        const result = await connectWhatsApp();
+        if (!result.success) {
+            setWaError(result.error);
+        } else {
             setIntegrations(prev => {
                 const filtered = prev.filter((i: any) => i.channel !== 'whatsapp');
                 return [...filtered, result];
@@ -51,19 +55,18 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
             if (result.qrBase64) {
                 setQrCode(result.qrBase64);
             }
-        } catch (e: any) {
-            alert(e.message);
-        } finally {
-            setLoadingWhatsapp(false);
         }
+        setLoadingWhatsapp(false);
     };
 
     const handleConnectInstagram = async (e: React.FormEvent) => {
         e.preventDefault();
         setIgLoading(true);
         setIgError('');
-        try {
-            const result = await connectInstagram(igUser, igPass);
+        const result = await connectInstagram(igUser, igPass);
+        if (!result.success) {
+            setIgError(result.error);
+        } else {
             setIntegrations(prev => {
                 const filtered = prev.filter((i: any) => i.channel !== 'instagram');
                 return [...filtered, result];
@@ -71,11 +74,8 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
             setShowIgLogin(false);
             setIgUser('');
             setIgPass('');
-        } catch (e: any) {
-            setIgError(e.message);
-        } finally {
-            setIgLoading(false);
         }
+        setIgLoading(false);
     };
 
     const handleAddOrigin = async (e: React.FormEvent) => {
@@ -143,6 +143,8 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
                                 <p className="text-sm text-green-700 font-medium">WhatsApp conectado e recebendo mensagens</p>
                             </div>
                         )}
+
+                        {waError && <p className="text-red-500 text-xs bg-red-50 p-2 rounded border border-red-200">{waError}</p>}
 
                         <button
                             disabled={loadingWhatsapp}
