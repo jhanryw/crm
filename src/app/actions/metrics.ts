@@ -4,16 +4,18 @@ import { createClient } from '@supabase/supabase-js';
 import { getLogtoContext } from '@logto/next/server-actions';
 import { logtoConfig } from '@/lib/auth/logto';
 
-const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+function getSupabase() {
+    return createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+}
 
 async function getOrgId() {
     const { isAuthenticated, claims } = await getLogtoContext(logtoConfig);
     if (!isAuthenticated || !claims?.sub) return null;
 
-    const { data: user } = await supabase
+    const { data: user } = await getSupabase()
         .from('users')
         .select('organization_id')
         .eq('logto_id', claims.sub)
@@ -25,6 +27,8 @@ async function getOrgId() {
 export async function getDashboardMetrics() {
     const orgId = await getOrgId();
     if (!orgId) return { totalPipeline: 0, totalLeads: 0, conversionRate: 0, pendingConversations: 0, leadsBySource: [] };
+
+    const supabase = getSupabase();
 
     // Buscar todos os leads com estágio
     const [leadsRes, convRes] = await Promise.all([
