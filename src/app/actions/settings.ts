@@ -41,7 +41,10 @@ export async function connectWhatsApp(): Promise<
         }
 
         const qrData = await qrRes.json();
-        const qrBase64 = qrData.base64 || qrData.qrcode?.base64 || qrData.code || null;
+        // Evolution API sometimes returns a full data URI — strip prefix so we store raw base64 only
+        let rawQr: string | null = qrData.base64 || qrData.qrcode?.base64 || qrData.code || null;
+        if (rawQr?.startsWith('data:')) rawQr = rawQr.split(',')[1] ?? null;
+        const qrBase64 = rawQr;
 
         const { data, error } = await getServiceSupabase()
             .from('integrations')
@@ -61,50 +64,9 @@ export async function connectWhatsApp(): Promise<
     }
 }
 
-export async function connectInstagram(username: string, password: string): Promise<
-    { success: true; [key: string]: any } |
-    { success: false; error: string }
-> {
-    try {
-        const { orgId, role } = await requireAuth();
-        if (role === 'salesperson') return { success: false, error: 'Sem permissão para configurar integrações.' };
-        if (!username || !password) return { success: false, error: 'Usuário e senha são obrigatórios.' };
-
-        let sessionData: string | null = null;
-
-        try {
-            const { IgApiClient } = await import('instagram-private-api');
-            const ig = new IgApiClient();
-            ig.state.generateDevice(username);
-            await ig.account.login(username, password);
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const serialized: any = await ig.state.serialize();
-            delete serialized.constants;
-            sessionData = JSON.stringify(serialized);
-        } catch (err: any) {
-            const msg = err?.message || 'Erro desconhecido';
-            if (msg.includes('challenge')) return { success: false, error: 'Instagram solicitou verificação (2FA). Desative o 2FA ou use outra conta.' };
-            if (msg.toLowerCase().includes('bad password') || msg.toLowerCase().includes('password')) return { success: false, error: 'Usuário ou senha incorretos.' };
-            return { success: false, error: `Erro ao fazer login no Instagram: ${msg}` };
-        }
-
-        const { data, error } = await getServiceSupabase()
-            .from('integrations')
-            .upsert(
-                { organization_id: orgId, channel: 'instagram', status: 'connected', config: { username, session: sessionData } },
-                { onConflict: 'organization_id, channel' }
-            )
-            .select()
-            .single();
-
-        if (error) return { success: false, error: `Erro ao salvar integração: ${error.message}` };
-
-        revalidatePath('/settings');
-        return { success: true, ...data };
-    } catch (e: any) {
-        return { success: false, error: e?.message || 'Erro inesperado ao conectar Instagram.' };
-    }
-}
+// Instagram connection is now handled via Meta OAuth routes:
+// GET /api/auth/instagram/connect  → redirects to Meta/Facebook login
+// GET /api/auth/instagram/callback → exchanges code, saves token
 
 // ORIGINS
 export async function getOrigins() {

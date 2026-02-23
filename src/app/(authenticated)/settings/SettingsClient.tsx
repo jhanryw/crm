@@ -1,10 +1,24 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { connectWhatsApp, connectInstagram, getIntegrations, addOrigin, deleteOrigin } from '@/app/actions/settings';
-import { CheckCircle, Wifi, WifiOff, Loader2 } from 'lucide-react';
+import { connectWhatsApp, getIntegrations, addOrigin, deleteOrigin } from '@/app/actions/settings';
+import { CheckCircle, Wifi, WifiOff, Loader2, ExternalLink } from 'lucide-react';
 
-export default function SettingsClient({ initialIntegrations, initialOrigins }: { initialIntegrations: any[], initialOrigins: any[] }) {
+/** Safely build a valid <img src> from raw base64 or an existing data URI */
+function toImgSrc(raw: string | null | undefined): string | null {
+    if (!raw) return null;
+    if (raw.startsWith('data:')) return raw;
+    return `data:image/png;base64,${raw}`;
+}
+
+interface Props {
+    initialIntegrations: any[];
+    initialOrigins: any[];
+    instagramError?: string;
+    instagramSuccess?: boolean;
+}
+
+export default function SettingsClient({ initialIntegrations, initialOrigins, instagramError, instagramSuccess }: Props) {
     const [origins, setOrigins] = useState(initialOrigins);
     const [integrations, setIntegrations] = useState(initialIntegrations);
     const [originName, setOriginName] = useState('');
@@ -12,18 +26,13 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
     const [loadingWhatsapp, setLoadingWhatsapp] = useState(false);
     const [waError, setWaError] = useState('');
     const [qrCode, setQrCode] = useState<string | null>(null);
-    const [showIgLogin, setShowIgLogin] = useState(false);
-    const [igUser, setIgUser] = useState('');
-    const [igPass, setIgPass] = useState('');
-    const [igLoading, setIgLoading] = useState(false);
-    const [igError, setIgError] = useState('');
     const [originError, setOriginError] = useState('');
     const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     const whatsappIntegration = integrations.find((i: any) => i.channel === 'whatsapp');
     const instagramIntegration = integrations.find((i: any) => i.channel === 'instagram');
 
-    // Polling de status do WhatsApp enquanto está connecting
+    // Poll WhatsApp status while connecting
     useEffect(() => {
         if (whatsappIntegration?.status === 'connecting') {
             pollingRef.current = setInterval(async () => {
@@ -49,44 +58,17 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
         if (!result.success) {
             setWaError(result.error);
         } else {
-            setIntegrations(prev => {
-                const filtered = prev.filter((i: any) => i.channel !== 'whatsapp');
-                return [...filtered, result];
-            });
-            if (result.qrBase64) {
-                setQrCode(result.qrBase64);
-            }
+            setIntegrations(prev => [...prev.filter((i: any) => i.channel !== 'whatsapp'), result]);
+            if (result.qrBase64) setQrCode(result.qrBase64);
         }
         setLoadingWhatsapp(false);
-    };
-
-    const handleConnectInstagram = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setIgLoading(true);
-        setIgError('');
-        const result = await connectInstagram(igUser, igPass);
-        if (!result.success) {
-            setIgError(result.error);
-        } else {
-            setIntegrations(prev => {
-                const filtered = prev.filter((i: any) => i.channel !== 'instagram');
-                return [...filtered, result];
-            });
-            setShowIgLogin(false);
-            setIgUser('');
-            setIgPass('');
-        }
-        setIgLoading(false);
     };
 
     const handleAddOrigin = async (e: React.FormEvent) => {
         e.preventDefault();
         setOriginError('');
         const result = await addOrigin(originName, originRegex);
-        if (!result.success) {
-            setOriginError(result.error);
-            return;
-        }
+        if (!result.success) { setOriginError(result.error); return; }
         setOrigins((prev: any[]) => [...prev, { id: Date.now(), name: originName, auto_match_regex: originRegex || null }]);
         setOriginName('');
         setOriginRegex('');
@@ -96,10 +78,7 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
         if (!confirm('Tem certeza que deseja excluir esta origem?')) return;
         setOriginError('');
         const result = await deleteOrigin(id);
-        if (!result.success) {
-            setOriginError(result.error);
-            return;
-        }
+        if (!result.success) { setOriginError(result.error); return; }
         setOrigins((prev: any[]) => prev.filter(o => o.id !== id));
     };
 
@@ -109,12 +88,16 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
         return <span className="flex items-center gap-1 px-2 py-1 text-xs rounded-full font-medium bg-gray-100 text-gray-600"><WifiOff size={12} /> Desconectado</span>;
     };
 
+    // QR src — handles raw base64 AND full data URIs from Evolution API
+    const qrSrc = toImgSrc(qrCode ?? (whatsappIntegration?.status === 'connecting' ? whatsappIntegration?.config?.qrCode : null));
+
     return (
         <div className="space-y-12">
             {/* Integrações */}
             <section>
                 <h3 className="text-xl font-bold text-gray-800 border-b pb-2 mb-4">Integrações (Canais)</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
                     {/* WhatsApp */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-4">
                         <div className="flex justify-between items-center">
@@ -127,14 +110,18 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
 
                         <p className="text-sm text-gray-500">Conecte seu WhatsApp escaneando o QR Code — funciona como um dispositivo adicional (Evolution API).</p>
 
-                        {/* QR Code */}
-                        {(qrCode || (whatsappIntegration?.status === 'connecting' && whatsappIntegration?.config?.qrCode)) && (
+                        {/* QR Code — only rendered when src is valid */}
+                        {qrSrc && (
                             <div className="flex flex-col items-center gap-2 p-4 bg-gray-50 rounded-xl border border-gray-200">
                                 <p className="text-xs text-gray-500 font-medium">Escaneie com o WhatsApp do seu celular</p>
                                 <img
-                                    src={`data:image/png;base64,${qrCode || whatsappIntegration?.config?.qrCode}`}
+                                    src={qrSrc}
                                     alt="QR Code WhatsApp"
                                     className="w-48 h-48 rounded-lg"
+                                    onError={(e) => {
+                                        console.error('[QR] Falha ao renderizar. Prefixo:', qrSrc.slice(0, 50));
+                                        (e.target as HTMLImageElement).style.display = 'none';
+                                    }}
                                 />
                                 <p className="text-xs text-gray-400">Aguardando conexão... <Loader2 size={11} className="inline animate-spin" /></p>
                             </div>
@@ -162,7 +149,7 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
                         </button>
                     </div>
 
-                    {/* Instagram */}
+                    {/* Instagram — OAuth via Meta */}
                     <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-4">
                         <div className="flex justify-between items-center">
                             <h4 className="font-semibold text-lg flex items-center gap-2">
@@ -173,64 +160,45 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
                         </div>
 
                         <p className="text-sm text-gray-500">
-                            Entre com sua conta Instagram para receber e responder DMs diretamente no CRM.
-                            {' '}<span className="text-orange-500 font-medium">Use conta sem 2FA ativado.</span>
+                            Conecte via login oficial do Meta. Requer conta <strong>Business ou Creator</strong> vinculada a uma Página do Facebook.
                         </p>
 
-                        {instagramIntegration?.status === 'connected' && (
+                        {instagramSuccess && (
                             <div className="flex items-center gap-2 p-3 bg-green-50 rounded-lg border border-green-200">
                                 <CheckCircle size={16} className="text-green-600" />
-                                <p className="text-sm text-green-700 font-medium">@{instagramIntegration.config?.username} conectado</p>
+                                <p className="text-sm text-green-700 font-medium">Instagram conectado com sucesso!</p>
                             </div>
                         )}
 
-                        {showIgLogin ? (
-                            <form onSubmit={handleConnectInstagram} className="space-y-3">
-                                <input
-                                    type="text"
-                                    placeholder="@username"
-                                    required
-                                    value={igUser}
-                                    onChange={e => setIgUser(e.target.value)}
-                                    className="w-full text-gray-800 px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                                    disabled={igLoading}
-                                />
-                                <input
-                                    type="password"
-                                    placeholder="Senha"
-                                    required
-                                    value={igPass}
-                                    onChange={e => setIgPass(e.target.value)}
-                                    className="w-full text-gray-800 px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-pink-500 focus:border-transparent"
-                                    disabled={igLoading}
-                                />
-                                {igError && <p className="text-red-500 text-xs bg-red-50 p-2 rounded">{igError}</p>}
-                                <div className="flex gap-2">
-                                    <button
-                                        type="submit"
-                                        disabled={igLoading}
-                                        className="flex-1 py-2.5 bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                                    >
-                                        {igLoading ? <><Loader2 size={16} className="animate-spin" /> Conectando...</> : 'Entrar'}
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => { setShowIgLogin(false); setIgError(''); }}
-                                        className="py-2.5 px-4 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm"
-                                    >
-                                        Cancelar
-                                    </button>
-                                </div>
-                            </form>
-                        ) : (
-                            <button
-                                onClick={() => setShowIgLogin(true)}
-                                className="w-full py-2.5 bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium transition-colors"
-                            >
-                                {instagramIntegration?.status === 'connected' ? 'Reconectar Instagram' : 'Conectar Instagram'}
-                            </button>
+                        {instagramIntegration?.status === 'connected' && !instagramSuccess && (
+                            <div className="flex items-center gap-2 p-3 bg-green-50 rounded-lg border border-green-200">
+                                <CheckCircle size={16} className="text-green-600" />
+                                <p className="text-sm text-green-700 font-medium">
+                                    @{instagramIntegration.config?.username || 'conta'} conectado
+                                </p>
+                            </div>
                         )}
+
+                        {instagramError && (
+                            <p className="text-red-500 text-xs bg-red-50 p-2 rounded border border-red-200">
+                                {decodeURIComponent(instagramError)}
+                            </p>
+                        )}
+
+                        {/* Redirect to Meta OAuth — real Instagram website login */}
+                        <a
+                            href="/api/auth/instagram/connect"
+                            className="w-full py-2.5 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-center"
+                        >
+                            <ExternalLink size={16} />
+                            {instagramIntegration?.status === 'connected' ? 'Reconectar via Meta' : 'Conectar Instagram via Meta'}
+                        </a>
+
+                        <p className="text-xs text-gray-400 text-center">
+                            Você será redirecionado para o site do Facebook/Instagram para autorizar.
+                        </p>
                     </div>
+
                 </div>
             </section>
 
@@ -238,14 +206,12 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
             <section>
                 <h3 className="text-xl font-bold text-gray-800 border-b pb-2 mb-4">Origens de Lead & Rastreamento</h3>
                 <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                    <p className="text-sm text-gray-500 mb-5">Configure origens para atribuição automática por regex. Ex: se a primeira mensagem contiver "quero a promoção", atribui à origem correspondente.</p>
+                    <p className="text-sm text-gray-500 mb-5">Configure origens para atribuição automática por regex.</p>
                     <form onSubmit={handleAddOrigin} className="flex gap-3 items-end mb-6 flex-wrap">
                         <div className="flex-1 min-w-[180px]">
                             <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Nome da Origem</label>
                             <input
-                                required
-                                type="text"
-                                value={originName}
+                                required type="text" value={originName}
                                 onChange={e => setOriginName(e.target.value)}
                                 placeholder="Ex: Campanha Black Friday"
                                 className="text-gray-800 w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -254,8 +220,7 @@ export default function SettingsClient({ initialIntegrations, initialOrigins }: 
                         <div className="flex-1 min-w-[180px]">
                             <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Regex (Opcional)</label>
                             <input
-                                type="text"
-                                value={originRegex}
+                                type="text" value={originRegex}
                                 onChange={e => setOriginRegex(e.target.value)}
                                 placeholder="Ex: quero a promoção"
                                 className="text-gray-800 w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500"
