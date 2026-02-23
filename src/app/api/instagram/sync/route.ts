@@ -36,8 +36,10 @@ export async function GET(request: NextRequest) {
         await ig.state.deserialize(JSON.parse(sessionData));
 
         // Buscar threads do inbox direto
-        const inboxFeed = ig.feed.directInbox();
-        const threads = await inboxFeed.items();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const inboxFeed = ig.feed.directInbox() as any;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const threads: any[] = await inboxFeed.items();
 
         let synced = 0;
 
@@ -50,7 +52,9 @@ export async function GET(request: NextRequest) {
         const instagramOrganicOrigin = origins?.find(o => o.name === 'Instagram Orgânico');
 
         for (const thread of threads.slice(0, 20)) {
-            const contactUsername = thread.users?.[0]?.username;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const t = thread as any;
+            const contactUsername = t.users?.[0]?.username as string | undefined;
             if (!contactUsername) continue;
 
             // Encontrar ou criar conversa
@@ -82,13 +86,17 @@ export async function GET(request: NextRequest) {
             if (!conversationId) continue;
 
             // Sincronizar mensagens do thread
-            const threadItems = thread.items || [];
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const threadItems: any[] = t.items || [];
             for (const item of threadItems.slice(0, 10)) {
-                if (item.item_type !== 'text') continue;
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const it = item as any;
+                if (it.item_type !== 'text') continue;
 
-                const messageBody = item.text;
-                const direction = item.user_id === thread.viewer_id ? 'out' : 'in';
-                const createdAt = new Date(item.timestamp / 1000).toISOString();
+                const messageBody = it.text as string;
+                const direction = String(it.user_id) === String(t.viewer_id) ? 'out' : 'in';
+                const tsMs = Number(it.timestamp) / 1000;
+                const createdAt = new Date(tsMs).toISOString();
 
                 // Verificar se mensagem já existe (por timestamp aproximado)
                 const { data: existing } = await supabase
@@ -97,7 +105,7 @@ export async function GET(request: NextRequest) {
                     .eq('conversation_id', conversationId)
                     .eq('body', messageBody)
                     .eq('direction', direction)
-                    .gte('created_at', new Date(item.timestamp / 1000 - 2000).toISOString())
+                    .gte('created_at', new Date(tsMs - 2000).toISOString())
                     .single();
 
                 if (!existing) {
