@@ -3,13 +3,17 @@ import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+function getSupabase() {
+    return createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+}
 
 // GET /api/instagram/sync?orgId=xxx
 // Chamado pelo InboxClient para sincronizar DMs do Instagram
 export async function GET(request: NextRequest) {
+    const supabase = getSupabase();
     const orgId = request.nextUrl.searchParams.get('orgId');
     if (!orgId) {
         return NextResponse.json({ error: 'orgId obrigatório' }, { status: 400 });

@@ -5,9 +5,12 @@ import { getLogtoContext } from '@logto/next/server-actions';
 import { logtoConfig } from '@/lib/auth/logto';
 import { revalidatePath } from 'next/cache';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+function getSupabase() {
+    return createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+}
 
 const EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || '';
 const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
@@ -18,7 +21,7 @@ async function requireAuth() {
         throw new Error("Unauthorized");
     }
 
-    const { data: user } = await supabase
+    const { data: user } = await getSupabase()
         .from('users')
         .select('organization_id, role')
         .eq('logto_id', claims.sub)
@@ -32,7 +35,7 @@ async function requireAuth() {
 // INTEGRATIONS
 export async function getIntegrations() {
     const { orgId } = await requireAuth();
-    const { data } = await supabase.from('integrations').select('*').eq('organization_id', orgId);
+    const { data } = await getSupabase().from('integrations').select('*').eq('organization_id', orgId);
     return data || [];
 }
 
@@ -66,7 +69,7 @@ export async function connectWhatsApp() {
     // Evolution API v2 retorna { code: "base64..." } ou { qrcode: { base64: "..." } }
     const qrBase64 = qrData.base64 || qrData.qrcode?.base64 || qrData.code || null;
 
-    const { data, error } = await supabase
+    const { data, error } = await getSupabase()
         .from('integrations')
         .upsert(
             { organization_id: orgId, channel: 'whatsapp', status: 'connecting', config: { instanceName, qrCode: qrBase64 } },
@@ -109,7 +112,7 @@ export async function connectInstagram(username: string, password: string) {
         throw new Error(`Erro ao conectar Instagram: ${msg}`);
     }
 
-    const { data, error } = await supabase
+    const { data, error } = await getSupabase()
         .from('integrations')
         .upsert(
             { organization_id: orgId, channel: 'instagram', status: 'connected', config: { username, session: sessionData } },
@@ -126,7 +129,7 @@ export async function connectInstagram(username: string, password: string) {
 // ORIGINS
 export async function getOrigins() {
     const { orgId } = await requireAuth();
-    const { data } = await supabase.from('lead_origins').select('*').eq('organization_id', orgId).order('created_at', { ascending: true });
+    const { data } = await getSupabase().from('lead_origins').select('*').eq('organization_id', orgId).order('created_at', { ascending: true });
     return data || [];
 }
 
@@ -134,7 +137,7 @@ export async function addOrigin(name: string, regex: string) {
     const { orgId, role } = await requireAuth();
     if (role === 'salesperson') throw new Error("Unauthorized");
 
-    const { error } = await supabase
+    const { error } = await getSupabase()
         .from('lead_origins')
         .insert({ organization_id: orgId, name, auto_match_regex: regex || null });
     if (error) throw new Error(error.message);
@@ -145,7 +148,7 @@ export async function deleteOrigin(id: string) {
     const { orgId, role } = await requireAuth();
     if (role === 'salesperson') throw new Error("Unauthorized");
 
-    const { error } = await supabase
+    const { error } = await getSupabase()
         .from('lead_origins')
         .delete()
         .eq('id', id)
