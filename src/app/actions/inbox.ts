@@ -8,11 +8,26 @@ const EVOLUTION_API_KEY = process.env.EVOLUTION_API_KEY || '';
 
 export async function getConversations() {
     const { orgId } = await requireAuth();
-    const { data } = await getServiceSupabase()
+    const supabase = getServiceSupabase();
+
+    // Busca conversas sem o join leads(*) — o FK pode não existir dependendo da migration
+    const { data, error } = await supabase
         .from('inbox_conversations')
-        .select('*, lead_origins(name), leads(*)')
+        .select('*, lead_origins(name)')
         .eq('organization_id', orgId)
         .order('updated_at', { ascending: false });
+
+    if (error) {
+        // Fallback: se o join lead_origins falhar (FK ausente), busca só as colunas nativas
+        console.warn('[getConversations] join falhou, usando fallback:', error.message);
+        const { data: fallback } = await supabase
+            .from('inbox_conversations')
+            .select('*')
+            .eq('organization_id', orgId)
+            .order('updated_at', { ascending: false });
+        return fallback || [];
+    }
+
     return data || [];
 }
 
@@ -130,45 +145,76 @@ async function sendInstagramMessage(orgId: string, contactUsername: string, text
 
 export async function approveConversationAsLead(conversationId: string) {
     const { orgId, userId } = await requireAuth();
+    const supabase = getServiceSupabase();
 
-    const { data: conv } = await getServiceSupabase()
+    const { data: conv } = await supabase
         .from('inbox_conversations')
         .select('*')
         .eq('id', conversationId)
         .eq('organization_id', orgId)
         .single();
 
-    if (!conv) throw new Error("Conversa não encontrada");
+    if (!conv) throw new Error('Conversa não encontrada');
 
-    const { data: stage } = await getServiceSupabase()
+    // Buscar primeiro estágio da org
+    let { data: stage } = await supabase
         .from('stages')
-        .select('id')
+        .select('id, name')
         .eq('organization_id', orgId)
         .order('order_index', { ascending: true })
         .limit(1)
-        .single();
+        .maybeSingle();
+
+    // Se não existir nenhum estágio, criar o padrão automaticamente
+    if (!stage) {
+        const defaultStages = [
+            { name: 'Lead novo',     order_index: 0, organization_id: orgId },
+            { name: 'Em contato',    order_index: 1, organization_id: orgId },
+            { name: 'Proposta',      order_index: 2, organization_id: orgId },
+            { name: 'Negociação',    order_index: 3, organization_id: orgId },
+            { name: 'Ganho',         order_index: 4, organization_id: orgId },
+            { name: 'Perdido',       order_index: 5, organization_id: orgId },
+        ];
+        const { data: created } = await supabase
+            .from('stages')
+            .insert(defaultStages)
+            .select('id, name')
+            .order('order_index', { ascending: true })
+            .limit(1);
+        stage = created?.[0] ?? null;
+    }
+
+    if (!stage) throw new Error('Não foi possível encontrar ou criar um estágio para o lead.');
+
+    // Formatar nome do contato: se for número de telefone, formatar como "Contato +55..."
+    const rawContact: string = conv.contact_id || '';
+    const isPhone = /^\d+$/.test(rawContact);
+    const contactName = isPhone
+        ? `+${rawContact.slice(0, 2)} ${rawContact.slice(2, 4)} ${rawContact.slice(4)}`
+        : rawContact;
 
     const originSource = conv.channel === 'whatsapp' ? 'WhatsApp' : 'Instagram';
 
-    const { data: newLead, error: leadErr } = await getServiceSupabase()
+    const { data: newLead, error: leadErr } = await supabase
         .from('leads')
         .insert({
             organization_id: orgId,
             assigned_to: userId,
-            origin_id: conv.origin_id,
+            origin_id: conv.origin_id ?? null,
             source: originSource,
-            stage_id: stage?.id || null,
-            contact_name: conv.contact_id,
-            contact_phone: conv.channel === 'whatsapp' ? conv.contact_id : null,
+            stage_id: stage.id,
+            contact_name: contactName,
+            contact_phone: conv.channel === 'whatsapp' ? rawContact : null,
+            value: 0,
         })
         .select()
         .single();
 
-    if (leadErr) throw new Error(leadErr.message);
+    if (leadErr) throw new Error(`Erro ao criar lead: ${leadErr.message}`);
 
-    await getServiceSupabase()
+    await supabase
         .from('inbox_conversations')
-        .update({ status: 'active', updated_at: new Date().toISOString() })
+        .update({ status: 'active', lead_id: newLead.id, updated_at: new Date().toISOString() })
         .eq('id', conversationId);
 
     revalidatePath('/inbox');

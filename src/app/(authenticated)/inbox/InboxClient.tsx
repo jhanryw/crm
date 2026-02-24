@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { approveConversationAsLead, archiveConversation, sendMessage, getMessages } from '@/app/actions/inbox';
-import { Send, MessageSquare, Instagram, Phone, RefreshCw, Check } from 'lucide-react';
+import { Send, MessageSquare, Instagram, Phone, RefreshCw, Check, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 interface Props {
     initialConversations: any[];
@@ -40,10 +40,19 @@ export default function InboxClient({ initialConversations, orgId }: Props) {
     const [messages, setMessages] = useState<any[]>([]);
     const [inputText, setInputText] = useState('');
     const [sending, setSending] = useState(false);
+    const [approving, setApproving] = useState(false);
     const [loadingMessages, setLoadingMessages] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const supabase = createClient();
+
+    const showToast = (type: 'success' | 'error', message: string) => {
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        setToast({ type, message });
+        toastTimerRef.current = setTimeout(() => setToast(null), 4000);
+    };
 
     const filteredConvs = conversations.filter(c => c.status === tab);
     const pendingCount = conversations.filter(c => c.status === 'pending').length;
@@ -102,7 +111,7 @@ export default function InboxClient({ initialConversations, orgId }: Props) {
         try {
             await sendMessage(selectedConv.id, text);
         } catch (err: any) {
-            alert(`Erro ao enviar: ${err.message}`);
+            showToast('error', `Erro ao enviar: ${err.message}`);
             setMessages(prev => prev.filter(m => m.id !== optimistic.id));
             setInputText(text);
         } finally {
@@ -115,12 +124,23 @@ export default function InboxClient({ initialConversations, orgId }: Props) {
     };
 
     const handleApprove = async () => {
-        if (!selectedConv) return;
+        if (!selectedConv || approving) return;
+        setApproving(true);
         try {
             await approveConversationAsLead(selectedConv.id);
             setConversations(prev => prev.map(c => c.id === selectedConv.id ? { ...c, status: 'active' } : c));
-            setSelectedConv((prev: any) => prev ? { ...prev, status: 'active' } : null);
-        } catch (e: any) { alert(e.message); }
+            const approvedConv = { ...selectedConv, status: 'active' };
+            showToast('success', 'Lead criado no Pipeline com sucesso!');
+            // Switch to Ativas tab and keep conversation selected
+            setTimeout(() => {
+                setTab('active');
+                setSelectedConv(approvedConv);
+            }, 800);
+        } catch (e: any) {
+            showToast('error', e.message || 'Erro ao aprovar conversa');
+        } finally {
+            setApproving(false);
+        }
     };
 
     const handleArchive = async () => {
@@ -129,7 +149,10 @@ export default function InboxClient({ initialConversations, orgId }: Props) {
             await archiveConversation(selectedConv.id);
             setConversations(prev => prev.filter(c => c.id !== selectedConv.id));
             setSelectedConv(null);
-        } catch (e: any) { alert(e.message); }
+            showToast('success', 'Conversa arquivada.');
+        } catch (e: any) {
+            showToast('error', e.message || 'Erro ao arquivar');
+        }
     };
 
     const handleManualSync = async () => {
@@ -231,7 +254,24 @@ export default function InboxClient({ initialConversations, orgId }: Props) {
             </div>
 
             {/* ── Área de chat ── */}
-            <div className="flex-1 flex flex-col bg-white min-w-0">
+            <div className="flex-1 flex flex-col bg-white min-w-0 relative">
+                {/* Toast notification */}
+                {toast && (
+                    <div
+                        className="absolute top-4 left-1/2 z-50 flex items-center gap-2.5 px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium transition-all animate-in fade-in slide-in-from-top-2"
+                        style={{
+                            transform: 'translateX(-50%)',
+                            background: toast.type === 'success' ? '#e8faf7' : '#fef2f2',
+                            color: toast.type === 'success' ? '#107c65' : '#b91c1c',
+                            border: `1px solid ${toast.type === 'success' ? '#1fc2a9' : '#fca5a5'}`,
+                        }}
+                    >
+                        {toast.type === 'success'
+                            ? <CheckCircle2 size={15} />
+                            : <AlertCircle size={15} />}
+                        {toast.message}
+                    </div>
+                )}
                 {selectedConv ? (
                     <>
                         {/* Header */}
@@ -260,13 +300,16 @@ export default function InboxClient({ initialConversations, orgId }: Props) {
                                     </button>
                                     <button
                                         onClick={handleApprove}
-                                        className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 text-white"
+                                        disabled={approving}
+                                        className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 text-white disabled:opacity-60"
                                         style={{ background: '#1fc2a9' }}
-                                        onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#107c65'}
+                                        onMouseEnter={e => { if (!approving) (e.currentTarget as HTMLButtonElement).style.background = '#107c65'; }}
                                         onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = '#1fc2a9'}
                                     >
-                                        <Check size={13} />
-                                        Aprovar → Pipeline
+                                        {approving
+                                            ? <><div className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Criando...</>
+                                            : <><Check size={13} /> Aprovar → Pipeline</>
+                                        }
                                     </button>
                                 </div>
                             )}
