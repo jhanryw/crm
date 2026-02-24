@@ -10,8 +10,8 @@ function getSupabase() {
     );
 }
 
-export async function GET(request: NextRequest) {
-    // Evolution API verifica o webhook com GET em alguns casos
+export async function GET() {
+    // Evolution API verifica o webhook com GET
     return NextResponse.json({ status: 'ok' });
 }
 
@@ -20,22 +20,31 @@ export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
 
-        // Handler de evento de conexão (QR code escaneado)
-        if (body.event === 'connection.update') {
-            const instanceName = body.instance;
-            const state = body.data?.state;
+        // Normalise event name — Evolution API sends lowercase ("connection.update")
+        // but we also accept uppercase variants
+        const event: string = (body.event || body.type || '').toLowerCase();
+        const instanceName: string = body.instance || body.instanceName || body.instanceId || '';
+
+        console.log('[WA webhook]', event, instanceName);
+
+        // ── Connection status update ──────────────────────────────────────────
+        if (event === 'connection.update') {
+            const state: string = (body.data?.state || '').toLowerCase();
 
             if (instanceName && state === 'open') {
-                // WhatsApp conectado — atualizar status da integração
-                await supabase
+                const { error } = await supabase
                     .from('integrations')
                     .update({ status: 'connected', updated_at: new Date().toISOString() })
                     .eq('channel', 'whatsapp')
                     .filter('config->>instanceName', 'eq', instanceName);
-            } else if (instanceName && (state === 'close' || state === 'connecting')) {
+
+                if (error) console.error('[WA webhook] update connected error:', error.message);
+                else console.log('[WA webhook] status → connected', instanceName);
+
+            } else if (instanceName && (state === 'close' || state === 'closed')) {
                 await supabase
                     .from('integrations')
-                    .update({ status: state === 'close' ? 'disconnected' : 'connecting', updated_at: new Date().toISOString() })
+                    .update({ status: 'disconnected', updated_at: new Date().toISOString() })
                     .eq('channel', 'whatsapp')
                     .filter('config->>instanceName', 'eq', instanceName);
             }
@@ -43,32 +52,57 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ success: true });
         }
 
-        // Ignorar eventos que não sejam de mensagens recebidas
-        const event = body.event || '';
-        if (event && !event.includes('message') && event !== '') {
+        // ── QR code updated (new QR generated) ───────────────────────────────
+        if (event === 'qrcode.updated') {
+            const base64: string | null = body.data?.qrcode?.base64
+                || body.data?.base64
+                || body.qrcode?.base64
+                || null;
+
+            if (instanceName && base64) {
+                // Strip data URI prefix if present
+                const rawBase64 = base64.startsWith('data:') ? base64.split(',')[1] ?? base64 : base64;
+                await supabase
+                    .from('integrations')
+                    .update({
+                        status: 'connecting',
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('channel', 'whatsapp')
+                    .filter('config->>instanceName', 'eq', instanceName);
+                // Note: we don't overwrite the full config here to keep instanceName intact
+                // The frontend polls and will show the stored QR if needed
+                console.log('[WA webhook] QR updated for', instanceName, 'base64 length:', rawBase64?.length);
+            }
+
+            return NextResponse.json({ success: true });
+        }
+
+        // ── Ignore non-message events ─────────────────────────────────────────
+        if (event && !event.includes('message')) {
             return NextResponse.json({ ignored: true, event });
         }
 
-        // Extrair dados da mensagem
-        // Evolution API v2 envia: { event: "messages.upsert", instance: "nome", data: { key: { remoteJid, fromMe }, message: { conversation } } }
+        // ── Incoming message (messages.upsert) ────────────────────────────────
         const fromMe = body.data?.key?.fromMe === true;
         if (fromMe) {
-            // Ignorar mensagens enviadas pelo próprio número
             return NextResponse.json({ ignored: true, reason: 'fromMe' });
         }
 
-        const phoneContact = (body.data?.key?.remoteJid || body.sender || 'unknown').split('@')[0].split(':')[0];
+        const phoneContact = (body.data?.key?.remoteJid || body.sender || 'unknown')
+            .split('@')[0].split(':')[0];
+
         const messageText = body.data?.message?.conversation
             || body.data?.message?.extendedTextMessage?.text
+            || body.data?.message?.imageMessage?.caption
             || body.message
             || '';
-        const instanceName = body.instance || body.instanceId;
 
         if (!instanceName || !messageText) {
             return NextResponse.json({ ignored: true, reason: 'no instance or message' });
         }
 
-        // 1. Achar a organização por instanceName no config da integração
+        // 1. Find org by instanceName
         const { data: integrations } = await supabase
             .from('integrations')
             .select('organization_id, config')
@@ -76,15 +110,15 @@ export async function POST(request: NextRequest) {
             .filter('config->>instanceName', 'eq', instanceName);
 
         const integration = integrations?.[0];
-
         if (!integration) {
-            return NextResponse.json({ error: 'Integração não encontrada para instância: ' + instanceName }, { status: 404 });
+            console.error('[WA webhook] Integration not found for instance:', instanceName);
+            return NextResponse.json({ error: 'Integration not found: ' + instanceName }, { status: 404 });
         }
 
         const orgId = integration.organization_id;
 
-        // 2. Achar origem via regex
-        let originId = null;
+        // 2. Match origin via regex
+        let originId: string | null = null;
         const { data: origins } = await supabase
             .from('lead_origins')
             .select('id, name, auto_match_regex')
@@ -98,7 +132,7 @@ export async function POST(request: NextRequest) {
                             originId = origin.id;
                             break;
                         }
-                    } catch { /* regex inválida, ignorar */ }
+                    } catch { /* invalid regex, skip */ }
                 }
             }
             if (!originId) {
@@ -107,18 +141,24 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // 3. Encontrar ou criar conversa
+        // 3. Find or create conversation
         const { data: existingConv } = await supabase
             .from('inbox_conversations')
             .select('id, status')
             .eq('organization_id', orgId)
             .eq('channel', 'whatsapp')
             .eq('contact_id', phoneContact)
-            .single();
+            .maybeSingle();
 
-        let conversationId = existingConv?.id;
+        let conversationId: string;
 
-        if (!conversationId) {
+        if (existingConv) {
+            conversationId = existingConv.id;
+            await supabase
+                .from('inbox_conversations')
+                .update({ updated_at: new Date().toISOString() })
+                .eq('id', conversationId);
+        } else {
             const { data: newConv, error: convErr } = await supabase
                 .from('inbox_conversations')
                 .insert({
@@ -131,17 +171,11 @@ export async function POST(request: NextRequest) {
                 .select('id')
                 .single();
 
-            if (convErr) throw convErr;
+            if (convErr || !newConv) throw new Error(convErr?.message || 'Failed to create conversation');
             conversationId = newConv.id;
-        } else {
-            // Atualizar updated_at da conversa para aparecer no topo
-            await supabase
-                .from('inbox_conversations')
-                .update({ updated_at: new Date().toISOString() })
-                .eq('id', conversationId);
         }
 
-        // 4. Salvar mensagem
+        // 4. Save message
         await supabase.from('messages').insert({
             organization_id: orgId,
             conversation_id: conversationId,
@@ -149,10 +183,11 @@ export async function POST(request: NextRequest) {
             body: messageText,
         });
 
+        console.log('[WA webhook] message saved, conv:', conversationId);
         return NextResponse.json({ success: true, conversationId });
 
     } catch (error: any) {
-        console.error('Erro no webhook WhatsApp:', error);
+        console.error('[WA webhook] Error:', error?.message);
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }

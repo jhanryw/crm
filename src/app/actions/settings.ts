@@ -25,11 +25,37 @@ export async function connectWhatsApp(): Promise<
         }
 
         const instanceName = `qarvon-${orgId.slice(0, 8)}`;
+        const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/whatsapp`;
 
+        // 1. Create instance — include webhook from the start
         await fetch(`${evolutionUrl}/instance/create`, {
             method: 'POST',
             headers: { 'apikey': evolutionKey, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instanceName, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
+            body: JSON.stringify({
+                instanceName,
+                qrcode: true,
+                integration: 'WHATSAPP-BAILEYS',
+                webhook: {
+                    url: webhookUrl,
+                    enabled: true,
+                    webhookByEvents: false,
+                    webhookBase64: false,
+                    events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED'],
+                },
+            }),
+        }).catch(() => null);
+
+        // 2. Re-set webhook for instances created without one (idempotent)
+        await fetch(`${evolutionUrl}/webhook/set/${instanceName}`, {
+            method: 'POST',
+            headers: { 'apikey': evolutionKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: webhookUrl,
+                enabled: true,
+                webhookByEvents: false,
+                webhookBase64: false,
+                events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED'],
+            }),
         }).catch(() => null);
 
         const qrRes = await fetch(`${evolutionUrl}/instance/connect/${instanceName}`, {

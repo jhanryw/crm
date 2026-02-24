@@ -5,3 +5,6 @@ build/
 .env
 .DS_Store
 *.code-workspace
+# Local env files with secrets
+.env.local
+.env*.local
