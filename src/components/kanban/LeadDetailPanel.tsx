@@ -20,6 +20,21 @@ function timeAgo(dateStr: string) {
     return `${Math.floor(hours / 24)}d atrás`;
 }
 
+function ChannelBadge({ source }: { source?: string }) {
+    if (!source) return null;
+    const s = source.toLowerCase();
+    const style = s.includes('whatsapp')
+        ? { bg: '#e8faf7', color: '#107c65' }
+        : s.includes('instagram')
+            ? { bg: '#fdf2f8', color: '#db2777' }
+            : { bg: '#f3f4f6', color: '#6b7280' };
+    return (
+        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full" style={{ background: style.bg, color: style.color }}>
+            {source}
+        </span>
+    );
+}
+
 export default function LeadDetailPanel({ leadId, stages, onClose, onValueUpdated }: Props) {
     const [lead, setLead] = useState<LeadDetail | null>(null);
     const [loading, setLoading] = useState(true);
@@ -45,36 +60,29 @@ export default function LeadDetailPanel({ leadId, stages, onClose, onValueUpdate
             setLead(prev => prev ? { ...prev, value: newValue } : prev);
             onValueUpdated(leadId, newValue);
             setEditingValue(false);
-        } finally {
-            setSavingValue(false);
-        }
+        } finally { setSavingValue(false); }
     };
 
     const getStageName = (stageId: string) => stages.find(s => s.id === stageId)?.name || stageId;
 
-    const channelBadge = (source?: string) => {
-        if (!source) return null;
-        const isWA = source.toLowerCase().includes('whatsapp');
-        const isIG = source.toLowerCase().includes('instagram');
-        return (
-            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${isWA ? 'bg-green-100 text-green-700' : isIG ? 'bg-pink-100 text-pink-700' : 'bg-gray-100 text-gray-600'}`}>
-                {source}
-            </span>
-        );
-    };
-
     return (
-        <div className="fixed inset-y-0 right-0 w-96 bg-white shadow-2xl border-l border-gray-200 z-50 flex flex-col">
+        <div className="fixed inset-y-0 right-0 w-96 bg-white border-l border-gray-100 shadow-2xl z-50 flex flex-col">
             {/* Header */}
-            <div className="flex items-center justify-between p-5 border-b border-gray-100 bg-gray-50/50">
-                <h3 className="font-bold text-gray-800 text-lg">Detalhes do Lead</h3>
-                <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-200 transition-colors">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                <h3 className="font-bold text-gray-800 text-base">Detalhes do Lead</h3>
+                <button
+                    onClick={onClose}
+                    className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+                >
                     <X size={18} className="text-gray-500" />
                 </button>
             </div>
 
             {loading ? (
-                <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Carregando...</div>
+                <div className="flex-1 flex items-center justify-center gap-3 text-gray-400 text-sm">
+                    <div className="w-5 h-5 border-2 border-gray-200 rounded-full animate-spin" style={{ borderTopColor: '#1fc2a9' }} />
+                    Carregando...
+                </div>
             ) : !lead ? (
                 <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">Lead não encontrado</div>
             ) : (
@@ -82,31 +90,36 @@ export default function LeadDetailPanel({ leadId, stages, onClose, onValueUpdate
                     {/* Contato */}
                     <div className="p-5 border-b border-gray-100">
                         <div className="flex items-center gap-3 mb-4">
-                            <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                                <User size={22} className="text-blue-600" />
+                            <div
+                                className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+                                style={{ background: '#e8faf7' }}
+                            >
+                                <User size={22} style={{ color: '#1fc2a9' }} />
                             </div>
                             <div>
-                                <h4 className="font-bold text-gray-800 text-lg">{lead.contact_name}</h4>
-                                {channelBadge(lead.source)}
+                                <h4 className="font-bold text-gray-800 text-base">{lead.contact_name}</h4>
+                                <div className="mt-1">
+                                    <ChannelBadge source={lead.source} />
+                                </div>
                             </div>
                         </div>
 
                         <div className="space-y-2.5">
                             {lead.contact_phone && (
                                 <div className="flex items-center gap-2.5 text-sm text-gray-600">
-                                    <Phone size={15} className="text-gray-400 flex-shrink-0" />
+                                    <Phone size={14} className="text-gray-400 flex-shrink-0" />
                                     <span>{lead.contact_phone}</span>
                                 </div>
                             )}
                             {lead.lead_origins?.name && (
                                 <div className="flex items-center gap-2.5 text-sm text-gray-600">
-                                    <ChevronRight size={15} className="text-gray-400 flex-shrink-0" />
+                                    <ChevronRight size={14} className="text-gray-400 flex-shrink-0" />
                                     <span>Origem: <strong>{lead.lead_origins.name}</strong></span>
                                 </div>
                             )}
                             {lead.created_at && (
                                 <div className="flex items-center gap-2.5 text-sm text-gray-500">
-                                    <Clock size={15} className="text-gray-400 flex-shrink-0" />
+                                    <Clock size={14} className="text-gray-400 flex-shrink-0" />
                                     <span>Criado {timeAgo(lead.created_at)}</span>
                                 </div>
                             )}
@@ -115,43 +128,49 @@ export default function LeadDetailPanel({ leadId, stages, onClose, onValueUpdate
 
                     {/* Valor */}
                     <div className="p-5 border-b border-gray-100">
-                        <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Valor do Negócio</span>
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Valor do Negócio</span>
                             {!editingValue && (
-                                <button onClick={() => setEditingValue(true)} className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1">
+                                <button
+                                    onClick={() => setEditingValue(true)}
+                                    className="text-xs flex items-center gap-1 transition-colors"
+                                    style={{ color: '#1fc2a9' }}
+                                >
                                     <Edit2 size={12} /> Editar
                                 </button>
                             )}
                         </div>
                         {editingValue ? (
-                            <div className="flex gap-2 mt-2">
+                            <div className="flex gap-2">
                                 <div className="relative flex-1">
-                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">R$</span>
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">R$</span>
                                     <input
                                         type="number"
                                         value={valueInput}
                                         onChange={e => setValueInput(e.target.value)}
-                                        className="w-full pl-9 pr-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-800"
+                                        className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm text-gray-800"
+                                        style={{ outline: 'none', borderColor: '#1fc2a9' }}
                                         autoFocus
                                     />
                                 </div>
                                 <button
                                     onClick={handleSaveValue}
                                     disabled={savingValue}
-                                    className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                                    className="px-3 py-2 rounded-xl text-white disabled:opacity-50"
+                                    style={{ background: '#1fc2a9' }}
                                 >
                                     <Check size={16} />
                                 </button>
                                 <button
                                     onClick={() => { setEditingValue(false); setValueInput(String(lead.value || 0)); }}
-                                    className="px-3 py-2 bg-gray-100 text-gray-600 rounded-lg hover:bg-gray-200"
+                                    className="px-3 py-2 bg-gray-100 text-gray-600 rounded-xl hover:bg-gray-200"
                                 >
                                     <X size={16} />
                                 </button>
                             </div>
                         ) : (
-                            <div className="flex items-center gap-2 mt-1">
-                                <DollarSign size={18} className="text-green-500" />
+                            <div className="flex items-center gap-2">
+                                <DollarSign size={18} style={{ color: '#1fc2a9' }} />
                                 <span className="text-2xl font-bold text-gray-800">
                                     {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(lead.value || 0)}
                                 </span>
@@ -161,20 +180,23 @@ export default function LeadDetailPanel({ leadId, stages, onClose, onValueUpdate
 
                     {/* Stage atual */}
                     <div className="p-5 border-b border-gray-100">
-                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-2">Stage Atual</span>
-                        <span className="inline-block bg-blue-50 text-blue-700 font-medium px-3 py-1.5 rounded-lg text-sm">
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-2">Stage Atual</span>
+                        <span
+                            className="inline-block font-medium px-3 py-1.5 rounded-lg text-sm"
+                            style={{ background: '#e8faf7', color: '#107c65' }}
+                        >
                             {getStageName(lead.stage_id)}
                         </span>
                     </div>
 
-                    {/* Histórico de movimentações */}
+                    {/* Histórico */}
                     <div className="p-5">
-                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-3">Histórico de Movimentações</span>
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-3">Histórico</span>
                         {lead.deals_history && lead.deals_history.length > 0 ? (
                             <div className="space-y-3">
                                 {lead.deals_history.map((h, i) => (
                                     <div key={i} className="flex items-start gap-3 text-sm">
-                                        <div className="w-2 h-2 rounded-full bg-blue-400 mt-1.5 flex-shrink-0" />
+                                        <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ background: '#1fc2a9' }} />
                                         <div>
                                             <p className="text-gray-700">
                                                 <span className="font-medium">{getStageName(h.old_stage) || '—'}</span>

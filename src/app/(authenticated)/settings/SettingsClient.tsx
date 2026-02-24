@@ -2,9 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { connectWhatsApp, syncWhatsAppStatus, getIntegrations, addOrigin, deleteOrigin } from '@/app/actions/settings';
-import { CheckCircle, Wifi, WifiOff, Loader2, ExternalLink, RefreshCw } from 'lucide-react';
+import { CheckCircle, Wifi, WifiOff, Loader2, ExternalLink, RefreshCw, Trash2 } from 'lucide-react';
 
-/** Safely build a valid <img src> from raw base64 or an existing data URI */
 function toImgSrc(raw: string | null | undefined): string | null {
     if (!raw) return null;
     if (raw.startsWith('data:')) return raw;
@@ -16,6 +15,31 @@ interface Props {
     initialOrigins: any[];
     instagramError?: string;
     instagramSuccess?: boolean;
+}
+
+function PrimaryBtn({ onClick, disabled, children, className = '' }: {
+    onClick?: () => void; disabled?: boolean; children: React.ReactNode; className?: string;
+}) {
+    return (
+        <button
+            onClick={onClick}
+            disabled={disabled}
+            className={`flex items-center justify-center gap-2 font-semibold text-sm px-4 py-2.5 rounded-xl transition-all disabled:opacity-50 text-white ${className}`}
+            style={{ background: '#1fc2a9' }}
+            onMouseEnter={e => { if (!disabled) (e.currentTarget as HTMLButtonElement).style.background = '#107c65'; }}
+            onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = '#1fc2a9'}
+        >
+            {children}
+        </button>
+    );
+}
+
+function StatusBadge({ status }: { status?: string }) {
+    if (status === 'connected')
+        return <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full font-semibold" style={{ background: '#e8faf7', color: '#107c65' }}><CheckCircle size={12} /> Conectado</span>;
+    if (status === 'connecting')
+        return <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full font-semibold bg-amber-50 text-amber-600"><Loader2 size={12} className="animate-spin" /> Aguardando QR</span>;
+    return <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-full font-semibold bg-gray-100 text-gray-500"><WifiOff size={12} /> Desconectado</span>;
 }
 
 export default function SettingsClient({ initialIntegrations, initialOrigins, instagramError, instagramSuccess }: Props) {
@@ -34,7 +58,6 @@ export default function SettingsClient({ initialIntegrations, initialOrigins, in
     const whatsappIntegration = integrations.find((i: any) => i.channel === 'whatsapp');
     const instagramIntegration = integrations.find((i: any) => i.channel === 'instagram');
 
-    // Poll WhatsApp status while connecting
     useEffect(() => {
         if (whatsappIntegration?.status === 'connecting') {
             pollingRef.current = setInterval(async () => {
@@ -53,38 +76,26 @@ export default function SettingsClient({ initialIntegrations, initialOrigins, in
     }, [whatsappIntegration?.status]);
 
     const handleConnectWhatsapp = async () => {
-        setLoadingWhatsapp(true);
-        setWaError('');
-        setWaSuccess('');
-        setQrCode(null);
+        setLoadingWhatsapp(true); setWaError(''); setWaSuccess(''); setQrCode(null);
         const result = await connectWhatsApp();
-        if (!result.success) {
-            setWaError(result.error);
-        } else {
+        if (!result.success) { setWaError(result.error); }
+        else {
             setIntegrations(prev => [...prev.filter((i: any) => i.channel !== 'whatsapp'), result]);
-            if (result.alreadyConnected) {
-                setWaSuccess('WhatsApp já estava conectado — status atualizado!');
-            } else if (result.qrBase64) {
-                setQrCode(result.qrBase64);
-            }
+            if (result.alreadyConnected) setWaSuccess('WhatsApp já estava conectado — status atualizado!');
+            else if (result.qrBase64) setQrCode(result.qrBase64);
         }
         setLoadingWhatsapp(false);
     };
 
     const handleSyncWhatsapp = async () => {
-        setSyncingWhatsapp(true);
-        setWaError('');
-        setWaSuccess('');
+        setSyncingWhatsapp(true); setWaError(''); setWaSuccess('');
         const result = await syncWhatsAppStatus();
-        if (!result.success) {
-            setWaError(result.error);
-        } else {
+        if (!result.success) { setWaError(result.error); }
+        else {
             setWaSuccess(
                 result.status === 'connected' ? '✅ Status sincronizado: Conectado!' :
-                result.status === 'disconnected' ? 'Status: Desconectado' :
-                'Status sincronizado: Aguardando QR'
+                result.status === 'disconnected' ? 'Status: Desconectado' : 'Status: Aguardando QR'
             );
-            // Refresh integrations list
             const fresh = await getIntegrations();
             setIntegrations(fresh);
             if (result.status === 'connected') setQrCode(null);
@@ -93,192 +104,178 @@ export default function SettingsClient({ initialIntegrations, initialOrigins, in
     };
 
     const handleAddOrigin = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setOriginError('');
+        e.preventDefault(); setOriginError('');
         const result = await addOrigin(originName, originRegex);
         if (!result.success) { setOriginError(result.error); return; }
-        setOrigins((prev: any[]) => [...prev, { id: Date.now(), name: originName, auto_match_regex: originRegex || null }]);
-        setOriginName('');
-        setOriginRegex('');
+        setOrigins(prev => [...prev, { id: Date.now(), name: originName, auto_match_regex: originRegex || null }]);
+        setOriginName(''); setOriginRegex('');
     };
 
     const handleDeleteOrigin = async (id: string) => {
-        if (!confirm('Tem certeza que deseja excluir esta origem?')) return;
+        if (!confirm('Excluir esta origem?')) return;
         setOriginError('');
         const result = await deleteOrigin(id);
         if (!result.success) { setOriginError(result.error); return; }
-        setOrigins((prev: any[]) => prev.filter(o => o.id !== id));
+        setOrigins(prev => prev.filter(o => o.id !== id));
     };
 
-    const statusBadge = (status?: string) => {
-        if (status === 'connected') return <span className="flex items-center gap-1 px-2 py-1 text-xs rounded-full font-medium bg-green-100 text-green-700"><CheckCircle size={12} /> Conectado</span>;
-        if (status === 'connecting') return <span className="flex items-center gap-1 px-2 py-1 text-xs rounded-full font-medium bg-yellow-100 text-yellow-700"><Loader2 size={12} className="animate-spin" /> Aguardando QR</span>;
-        return <span className="flex items-center gap-1 px-2 py-1 text-xs rounded-full font-medium bg-gray-100 text-gray-600"><WifiOff size={12} /> Desconectado</span>;
-    };
-
-    // QR src — handles raw base64 AND full data URIs from Evolution API
     const qrSrc = toImgSrc(qrCode ?? (whatsappIntegration?.status === 'connecting' ? whatsappIntegration?.config?.qrCode : null));
+    const inputClass = "w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-800 bg-white transition-colors outline-none";
 
     return (
-        <div className="space-y-12">
+        <div className="space-y-10 max-w-4xl">
+
             {/* Integrações */}
             <section>
-                <h3 className="text-xl font-bold text-gray-800 border-b pb-2 mb-4">Integrações (Canais)</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <h3 className="text-lg font-bold text-gray-800 mb-4">Integrações (Canais)</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
 
                     {/* WhatsApp */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-4">
+                    <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm flex flex-col gap-4">
                         <div className="flex justify-between items-center">
-                            <h4 className="font-semibold text-lg flex items-center gap-2">
-                                <span className="w-8 h-8 bg-green-100 text-green-600 rounded-lg flex items-center justify-center font-bold text-sm">WA</span>
-                                WhatsApp Web
+                            <h4 className="font-bold text-gray-800 flex items-center gap-2.5">
+                                <span className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm" style={{ background: '#e8faf7', color: '#107c65' }}>WA</span>
+                                WhatsApp
                             </h4>
-                            {statusBadge(whatsappIntegration?.status)}
+                            <StatusBadge status={whatsappIntegration?.status} />
                         </div>
 
-                        <p className="text-sm text-gray-500">Conecte seu WhatsApp escaneando o QR Code — funciona como um dispositivo adicional (Evolution API).</p>
+                        <p className="text-sm text-gray-500">Conecte via Evolution API escaneando o QR Code.</p>
 
-                        {/* QR Code — only rendered when src is valid */}
                         {qrSrc && (
-                            <div className="flex flex-col items-center gap-2 p-4 bg-gray-50 rounded-xl border border-gray-200">
-                                <p className="text-xs text-gray-500 font-medium">Escaneie com o WhatsApp do seu celular</p>
+                            <div className="flex flex-col items-center gap-2 p-4 bg-gray-50 rounded-xl border border-gray-100">
+                                <p className="text-xs text-gray-500">Escaneie com o WhatsApp do seu celular</p>
                                 <img
-                                    src={qrSrc}
-                                    alt="QR Code WhatsApp"
+                                    src={qrSrc} alt="QR Code"
                                     className="w-48 h-48 rounded-lg"
-                                    onError={(e) => {
-                                        console.error('[QR] Falha ao renderizar. Prefixo:', qrSrc.slice(0, 50));
-                                        (e.target as HTMLImageElement).style.display = 'none';
-                                    }}
+                                    onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                                 />
-                                <p className="text-xs text-gray-400">Aguardando conexão... <Loader2 size={11} className="inline animate-spin" /></p>
+                                <p className="text-xs text-gray-400 flex items-center gap-1">
+                                    <Loader2 size={11} className="animate-spin" /> Aguardando conexão...
+                                </p>
                             </div>
                         )}
 
                         {whatsappIntegration?.status === 'connected' && (
-                            <div className="flex items-center gap-2 p-3 bg-green-50 rounded-lg border border-green-200">
-                                <CheckCircle size={16} className="text-green-600" />
-                                <p className="text-sm text-green-700 font-medium">WhatsApp conectado e recebendo mensagens</p>
+                            <div className="flex items-center gap-2 p-3 rounded-xl border" style={{ background: '#e8faf7', borderColor: '#b2ece3' }}>
+                                <CheckCircle size={15} style={{ color: '#107c65' }} />
+                                <p className="text-sm font-medium" style={{ color: '#107c65' }}>WhatsApp conectado e recebendo mensagens</p>
                             </div>
                         )}
 
-                        {waSuccess && <p className="text-green-700 text-xs bg-green-50 p-2 rounded border border-green-200">{waSuccess}</p>}
-                        {waError && <p className="text-red-500 text-xs bg-red-50 p-2 rounded border border-red-200">{waError}</p>}
+                        {waSuccess && <p className="text-sm px-3 py-2 rounded-xl border font-medium" style={{ color: '#107c65', background: '#e8faf7', borderColor: '#b2ece3' }}>{waSuccess}</p>}
+                        {waError && <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-xl border border-red-100">{waError}</p>}
 
-                        <button
-                            disabled={loadingWhatsapp}
-                            onClick={handleConnectWhatsapp}
-                            className="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                        >
-                            {loadingWhatsapp
-                                ? <><Loader2 size={16} className="animate-spin" /> Verificando...</>
-                                : whatsappIntegration?.status === 'connecting' ? 'Gerar Novo QR Code'
-                                    : whatsappIntegration?.status === 'connected' ? <><Wifi size={16} /> Reconectar</>
-                                        : 'Conectar WhatsApp'}
-                        </button>
+                        <PrimaryBtn onClick={handleConnectWhatsapp} disabled={loadingWhatsapp} className="w-full">
+                            {loadingWhatsapp ? <><Loader2 size={15} className="animate-spin" /> Verificando...</> :
+                                whatsappIntegration?.status === 'connecting' ? 'Gerar Novo QR Code' :
+                                whatsappIntegration?.status === 'connected' ? <><Wifi size={15} /> Reconectar</> :
+                                'Conectar WhatsApp'}
+                        </PrimaryBtn>
 
-                        {/* Sync button — for when already connected but CRM didn't detect it */}
                         <button
                             disabled={syncingWhatsapp}
                             onClick={handleSyncWhatsapp}
-                            className="w-full py-2 border border-gray-300 hover:border-green-400 text-gray-600 hover:text-green-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700 transition-colors disabled:opacity-50"
                         >
-                            {syncingWhatsapp
-                                ? <><Loader2 size={14} className="animate-spin" /> Sincronizando...</>
-                                : <><RefreshCw size={14} /> Sincronizar Status</>}
+                            {syncingWhatsapp ? <><Loader2 size={14} className="animate-spin" /> Sincronizando...</> : <><RefreshCw size={14} /> Sincronizar Status</>}
                         </button>
                     </div>
 
-                    {/* Instagram — OAuth via Meta */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-4">
+                    {/* Instagram */}
+                    <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm flex flex-col gap-4">
                         <div className="flex justify-between items-center">
-                            <h4 className="font-semibold text-lg flex items-center gap-2">
-                                <span className="w-8 h-8 bg-pink-100 text-pink-600 rounded-lg flex items-center justify-center font-bold text-sm">IG</span>
+                            <h4 className="font-bold text-gray-800 flex items-center gap-2.5">
+                                <span className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm bg-pink-50 text-pink-600">IG</span>
                                 Instagram DMs
                             </h4>
-                            {statusBadge(instagramIntegration?.status)}
+                            <StatusBadge status={instagramIntegration?.status} />
                         </div>
 
                         <p className="text-sm text-gray-500">
-                            Conecte via login oficial do Meta. Requer conta <strong>Business ou Creator</strong> vinculada a uma Página do Facebook.
+                            Login oficial via Meta. Requer conta <strong>Business ou Creator</strong> vinculada a uma Página do Facebook.
                         </p>
 
                         {instagramSuccess && (
-                            <div className="flex items-center gap-2 p-3 bg-green-50 rounded-lg border border-green-200">
-                                <CheckCircle size={16} className="text-green-600" />
-                                <p className="text-sm text-green-700 font-medium">Instagram conectado com sucesso!</p>
+                            <div className="flex items-center gap-2 p-3 rounded-xl border" style={{ background: '#e8faf7', borderColor: '#b2ece3' }}>
+                                <CheckCircle size={15} style={{ color: '#107c65' }} />
+                                <p className="text-sm font-medium" style={{ color: '#107c65' }}>Instagram conectado com sucesso!</p>
                             </div>
                         )}
 
                         {instagramIntegration?.status === 'connected' && !instagramSuccess && (
-                            <div className="flex items-center gap-2 p-3 bg-green-50 rounded-lg border border-green-200">
-                                <CheckCircle size={16} className="text-green-600" />
-                                <p className="text-sm text-green-700 font-medium">
+                            <div className="flex items-center gap-2 p-3 rounded-xl border" style={{ background: '#e8faf7', borderColor: '#b2ece3' }}>
+                                <CheckCircle size={15} style={{ color: '#107c65' }} />
+                                <p className="text-sm font-medium" style={{ color: '#107c65' }}>
                                     @{instagramIntegration.config?.username || 'conta'} conectado
                                 </p>
                             </div>
                         )}
 
                         {instagramError && (
-                            <p className="text-red-500 text-xs bg-red-50 p-2 rounded border border-red-200">
+                            <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-xl border border-red-100">
                                 {decodeURIComponent(instagramError)}
                             </p>
                         )}
 
-                        {/* Redirect to Meta OAuth — real Instagram website login */}
                         <a
                             href="/api/auth/instagram/connect"
-                            className="w-full py-2.5 bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700 text-white rounded-lg font-medium transition-all flex items-center justify-center gap-2 text-center"
+                            className="w-full py-2.5 rounded-xl font-semibold text-sm text-white text-center flex items-center justify-center gap-2 transition-all"
+                            style={{ background: 'linear-gradient(135deg, #ec4899, #8b5cf6)' }}
+                            onMouseEnter={e => (e.currentTarget as HTMLAnchorElement).style.opacity = '0.88'}
+                            onMouseLeave={e => (e.currentTarget as HTMLAnchorElement).style.opacity = '1'}
                         >
-                            <ExternalLink size={16} />
-                            {instagramIntegration?.status === 'connected' ? 'Reconectar via Meta' : 'Conectar Instagram via Meta'}
+                            <ExternalLink size={15} />
+                            {instagramIntegration?.status === 'connected' ? 'Reconectar via Meta' : 'Conectar via Meta'}
                         </a>
-
-                        <p className="text-xs text-gray-400 text-center">
-                            Você será redirecionado para o site do Facebook/Instagram para autorizar.
-                        </p>
+                        <p className="text-xs text-gray-400 text-center">Você será redirecionado para o Facebook/Instagram.</p>
                     </div>
-
                 </div>
             </section>
 
-            {/* Origens */}
+            {/* Origens de Lead */}
             <section>
-                <h3 className="text-xl font-bold text-gray-800 border-b pb-2 mb-4">Origens de Lead & Rastreamento</h3>
-                <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
-                    <p className="text-sm text-gray-500 mb-5">Configure origens para atribuição automática por regex.</p>
+                <h3 className="text-lg font-bold text-gray-800 mb-4">Origens de Lead</h3>
+                <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+                    <p className="text-sm text-gray-500 mb-5">Configure origens com regex para atribuição automática.</p>
+
                     <form onSubmit={handleAddOrigin} className="flex gap-3 items-end mb-6 flex-wrap">
                         <div className="flex-1 min-w-[180px]">
-                            <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Nome da Origem</label>
+                            <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">Nome</label>
                             <input
                                 required type="text" value={originName}
                                 onChange={e => setOriginName(e.target.value)}
                                 placeholder="Ex: Campanha Black Friday"
-                                className="text-gray-800 w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className={inputClass}
+                                onFocus={e => (e.target.style.borderColor = '#1fc2a9')}
+                                onBlur={e => (e.target.style.borderColor = '#e5e7eb')}
                             />
                         </div>
                         <div className="flex-1 min-w-[180px]">
-                            <label className="block text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Regex (Opcional)</label>
+                            <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wider">Regex (opcional)</label>
                             <input
                                 type="text" value={originRegex}
                                 onChange={e => setOriginRegex(e.target.value)}
                                 placeholder="Ex: quero a promoção"
-                                className="text-gray-800 w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-blue-500"
+                                className={`${inputClass} font-mono`}
+                                onFocus={e => (e.target.style.borderColor = '#1fc2a9')}
+                                onBlur={e => (e.target.style.borderColor = '#e5e7eb')}
                             />
                         </div>
-                        <button type="submit" className="px-5 py-2.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 text-sm whitespace-nowrap">
-                            + Adicionar
-                        </button>
+                        <PrimaryBtn className="whitespace-nowrap px-5">+ Adicionar</PrimaryBtn>
                     </form>
 
-                    {originError && <p className="text-red-500 text-xs bg-red-50 p-2 rounded border border-red-200 mb-4">{originError}</p>}
-                    <div className="overflow-x-auto rounded-lg border border-gray-100">
+                    {originError && (
+                        <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-xl border border-red-100 mb-4">{originError}</p>
+                    )}
+
+                    <div className="rounded-xl border border-gray-100 overflow-hidden">
                         <table className="w-full text-left text-sm">
-                            <thead className="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+                            <thead style={{ background: '#f8f9fb' }}>
                                 <tr>
-                                    <th className="px-4 py-3">Nome</th>
-                                    <th className="px-4 py-3">Regex Ativador</th>
-                                    <th className="px-4 py-3 text-right">Ação</th>
+                                    <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Nome</th>
+                                    <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Regex</th>
+                                    <th className="px-4 py-3"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -287,12 +284,19 @@ export default function SettingsClient({ initialIntegrations, initialOrigins, in
                                         <td className="px-4 py-3 font-medium text-gray-800">{o.name}</td>
                                         <td className="px-4 py-3 font-mono text-xs text-gray-500">{o.auto_match_regex || <span className="italic text-gray-300">—</span>}</td>
                                         <td className="px-4 py-3 text-right">
-                                            <button onClick={() => handleDeleteOrigin(o.id)} className="text-red-400 hover:text-red-600 text-xs font-medium">Excluir</button>
+                                            <button
+                                                onClick={() => handleDeleteOrigin(o.id)}
+                                                className="p-1.5 rounded-lg hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors"
+                                            >
+                                                <Trash2 size={14} />
+                                            </button>
                                         </td>
                                     </tr>
                                 ))}
                                 {origins.length === 0 && (
-                                    <tr><td colSpan={3} className="px-4 py-8 text-center text-gray-400 text-sm">Nenhuma origem cadastrada ainda.</td></tr>
+                                    <tr>
+                                        <td colSpan={3} className="px-4 py-10 text-center text-gray-400 text-sm">Nenhuma origem cadastrada ainda.</td>
+                                    </tr>
                                 )}
                             </tbody>
                         </table>

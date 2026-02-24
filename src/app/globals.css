@@ -3,46 +3,35 @@
 @tailwind utilities;
 
 :root {
-  --qarvon-primary: #00a86b;
-  /* ajuste se tiver o verde oficial */
-  --qarvon-primary-dark: #008F5A;
-  --qarvon-primary-light: #E6F7F1;
-  --qarvon-text: #171716;
-  --qarvon-bg: #ffffff;
+    --q-primary: #1fc2a9;
+    --q-primary-dark: #107c65;
+    --q-primary-light: #e8faf7;
+    --q-sidebar: #111111;
+    --q-sidebar-hover: #1c1c1c;
+    --q-sidebar-border: #222222;
+    --q-text: #111111;
+    --q-text-muted: #6b7280;
+    --q-bg: #f5f6f8;
+    --q-card: #ffffff;
+    --q-card-border: #e5e7eb;
 }
 
 body {
-  @apply bg-white;
-  color: var(--qarvon-text);
+    color: var(--q-text);
+    background-color: var(--q-bg);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
-/* Links */
-a {
-  color: var(--qarvon-primary);
-}
+/* Scrollbar minimalista */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
 
-a:hover {
-  color: var(--qarvon-primary-dark);
-}
-
-/* Botões primários */
-.btn-primary {
-  background-color: var(--qarvon-primary);
-  color: white;
-  transition: all 0.2s ease-in-out;
-}
-
-.btn-primary:hover {
-  background-color: var(--qarvon-primary-dark);
-}
-
-/* Cards */
-.card {
-  @apply bg-white border border-gray-200 rounded-xl shadow-sm;
-}
-
-/* Sidebar */
-.sidebar {
-  background-color: #ffffff;
-  border-right: 1px solid #e5e5e5;
+/* Focus ring usando a cor primária */
+:focus-visible {
+    outline: 2px solid var(--q-primary);
+    outline-offset: 2px;
+    border-radius: 4px;
 }

@@ -15,7 +15,7 @@ export default async function AuthenticatedLayout({
     }
 
     return (
-        <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
+        <div className="flex h-screen" style={{ background: '#f5f6f8' }}>
             <Sidebar user={claims} />
             <main className="flex-1 overflow-y-auto p-8">
                 {children}
