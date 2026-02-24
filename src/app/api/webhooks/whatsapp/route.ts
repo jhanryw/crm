@@ -11,7 +11,6 @@ function getSupabase() {
 }
 
 export async function GET() {
-    // Evolution API verifica o webhook com GET
     return NextResponse.json({ status: 'ok' });
 }
 
@@ -20,89 +19,129 @@ export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
 
-        // Normalise event name — Evolution API sends lowercase ("connection.update")
-        // but we also accept uppercase variants
-        const event: string = (body.event || body.type || '').toLowerCase();
+        const event: string = (body.event || body.type || '').toLowerCase().replace(/_/g, '.');
         const instanceName: string = body.instance || body.instanceName || body.instanceId || '';
 
         console.log('[WA webhook]', event, instanceName);
 
-        // ── Connection status update ──────────────────────────────────────────
+        // ── Conexão ───────────────────────────────────────────────────────────
         if (event === 'connection.update') {
             const state: string = (body.data?.state || '').toLowerCase();
-
             if (instanceName && state === 'open') {
-                const { error } = await supabase
-                    .from('integrations')
+                await supabase.from('integrations')
                     .update({ status: 'connected', updated_at: new Date().toISOString() })
                     .eq('channel', 'whatsapp')
                     .filter('config->>instanceName', 'eq', instanceName);
-
-                if (error) console.error('[WA webhook] update connected error:', error.message);
-                else console.log('[WA webhook] status → connected', instanceName);
-
+                console.log('[WA] → connected', instanceName);
             } else if (instanceName && (state === 'close' || state === 'closed')) {
-                await supabase
-                    .from('integrations')
+                await supabase.from('integrations')
                     .update({ status: 'disconnected', updated_at: new Date().toISOString() })
                     .eq('channel', 'whatsapp')
                     .filter('config->>instanceName', 'eq', instanceName);
             }
-
-            return NextResponse.json({ success: true });
+            return NextResponse.json({ ok: true });
         }
 
-        // ── QR code updated (new QR generated) ───────────────────────────────
+        // ── QR code ───────────────────────────────────────────────────────────
         if (event === 'qrcode.updated') {
-            const base64: string | null = body.data?.qrcode?.base64
-                || body.data?.base64
-                || body.qrcode?.base64
-                || null;
-
+            const base64: string | null = body.data?.qrcode?.base64 || body.data?.base64 || null;
             if (instanceName && base64) {
-                // Strip data URI prefix if present
-                const rawBase64 = base64.startsWith('data:') ? base64.split(',')[1] ?? base64 : base64;
-                await supabase
-                    .from('integrations')
-                    .update({
-                        status: 'connecting',
-                        updated_at: new Date().toISOString(),
-                    })
+                await supabase.from('integrations')
+                    .update({ status: 'connecting', updated_at: new Date().toISOString() })
                     .eq('channel', 'whatsapp')
                     .filter('config->>instanceName', 'eq', instanceName);
-                // Note: we don't overwrite the full config here to keep instanceName intact
-                // The frontend polls and will show the stored QR if needed
-                console.log('[WA webhook] QR updated for', instanceName, 'base64 length:', rawBase64?.length);
             }
-
-            return NextResponse.json({ success: true });
+            return NextResponse.json({ ok: true });
         }
 
-        // ── Ignore non-message events ─────────────────────────────────────────
-        if (event && !event.includes('message')) {
+        // ── SEND_MESSAGE — mensagem enviada via Evolution API (pelo CRM ou app) ─
+        // Apenas atualiza o updated_at da conversa para subir na lista.
+        // Não cria nova mensagem pois o CRM já gravou ao enviar.
+        if (event === 'send.message' || event === 'message.send') {
+            const remoteJid: string = body.data?.key?.remoteJid || '';
+            if (!remoteJid || !instanceName) return NextResponse.json({ ok: true });
+
+            const phone = remoteJid.split('@')[0].split(':')[0];
+
+            // Encontrar org pela instância
+            const { data: integrations } = await supabase
+                .from('integrations')
+                .select('organization_id')
+                .eq('channel', 'whatsapp')
+                .filter('config->>instanceName', 'eq', instanceName);
+
+            const orgId = integrations?.[0]?.organization_id;
+            if (!orgId) return NextResponse.json({ ok: true });
+
+            // Atualizar timestamp da conversa para subir na lista
+            await supabase.from('inbox_conversations')
+                .update({ updated_at: new Date().toISOString() })
+                .eq('organization_id', orgId)
+                .eq('channel', 'whatsapp')
+                .eq('contact_id', phone);
+
+            return NextResponse.json({ ok: true });
+        }
+
+        // ── MESSAGES_UPDATE — confirmação de entrega/leitura ─────────────────
+        if (event === 'messages.update') {
+            const remoteJid: string = body.data?.[0]?.key?.remoteJid || body.data?.key?.remoteJid || '';
+            if (!remoteJid || !instanceName) return NextResponse.json({ ok: true });
+
+            const phone = remoteJid.split('@')[0].split(':')[0];
+
+            const { data: integrations } = await supabase
+                .from('integrations')
+                .select('organization_id')
+                .eq('channel', 'whatsapp')
+                .filter('config->>instanceName', 'eq', instanceName);
+
+            const orgId = integrations?.[0]?.organization_id;
+            if (!orgId) return NextResponse.json({ ok: true });
+
+            await supabase.from('inbox_conversations')
+                .update({ updated_at: new Date().toISOString() })
+                .eq('organization_id', orgId)
+                .eq('channel', 'whatsapp')
+                .eq('contact_id', phone);
+
+            return NextResponse.json({ ok: true });
+        }
+
+        // ── Ignorar outros eventos que não sejam de mensagem ─────────────────
+        if (!event.includes('message')) {
             return NextResponse.json({ ignored: true, event });
         }
 
-        // ── Incoming message (messages.upsert) ────────────────────────────────
-        const fromMe = body.data?.key?.fromMe === true;
-        if (fromMe) {
-            return NextResponse.json({ ignored: true, reason: 'fromMe' });
+        // ── MESSAGES_UPSERT — mensagem nova (recebida OU enviada pelo celular) ─
+        const fromMe: boolean = body.data?.key?.fromMe === true;
+        const remoteJid: string = body.data?.key?.remoteJid
+            || body.data?.remoteJid
+            || body.sender
+            || '';
+
+        if (!remoteJid || !instanceName) {
+            return NextResponse.json({ ignored: true, reason: 'no remoteJid or instance' });
         }
 
-        const phoneContact = (body.data?.key?.remoteJid || body.sender || 'unknown')
-            .split('@')[0].split(':')[0];
+        // Pular grupos e broadcasts
+        if (remoteJid.includes('@g.us') || remoteJid.includes('@broadcast')) {
+            return NextResponse.json({ ignored: true, reason: 'group or broadcast' });
+        }
 
-        const messageText = body.data?.message?.conversation
+        const messageText: string = body.data?.message?.conversation
             || body.data?.message?.extendedTextMessage?.text
             || body.data?.message?.imageMessage?.caption
             || body.message
             || '';
 
-        if (!instanceName || !messageText) {
-            return NextResponse.json({ ignored: true, reason: 'no instance or message' });
+        if (!messageText) {
+            return NextResponse.json({ ignored: true, reason: 'no text content' });
         }
 
-        // 1. Find org by instanceName
+        const phone = remoteJid.split('@')[0].split(':')[0];
+
+        // ── Encontrar org pela instância ──────────────────────────────────────
         const { data: integrations } = await supabase
             .from('integrations')
             .select('organization_id, config')
@@ -111,13 +150,27 @@ export async function POST(request: NextRequest) {
 
         const integration = integrations?.[0];
         if (!integration) {
-            console.error('[WA webhook] Integration not found for instance:', instanceName);
-            return NextResponse.json({ error: 'Integration not found: ' + instanceName }, { status: 404 });
+            console.error('[WA] Integration not found for instance:', instanceName);
+            return NextResponse.json({ error: 'Integration not found' }, { status: 404 });
         }
 
         const orgId = integration.organization_id;
 
-        // 2. Match origin via regex
+        // ── Se é mensagem enviada pelo celular (fromMe: true no MESSAGES_UPSERT):
+        // Apenas atualiza a conversa — o CRM já salva quando envia pelo app.
+        // Evita duplicatas sem precisar de external_id.
+        if (fromMe) {
+            await supabase.from('inbox_conversations')
+                .update({ updated_at: new Date().toISOString() })
+                .eq('organization_id', orgId)
+                .eq('channel', 'whatsapp')
+                .eq('contact_id', phone);
+            return NextResponse.json({ ok: true, note: 'fromMe: timestamp updated' });
+        }
+
+        // ── Mensagem RECEBIDA (fromMe: false) ─────────────────────────────────
+
+        // Match de origem por regex
         let originId: string | null = null;
         const { data: origins } = await supabase
             .from('lead_origins')
@@ -132,30 +185,29 @@ export async function POST(request: NextRequest) {
                             originId = origin.id;
                             break;
                         }
-                    } catch { /* invalid regex, skip */ }
+                    } catch { /* regex inválida */ }
                 }
             }
             if (!originId) {
-                const organic = origins.find(o => o.name === 'WhatsApp Orgânico');
+                const organic = origins.find((o: any) => o.name === 'WhatsApp Orgânico');
                 if (organic) originId = organic.id;
             }
         }
 
-        // 3. Find or create conversation
+        // Buscar ou criar conversa
         const { data: existingConv } = await supabase
             .from('inbox_conversations')
             .select('id, status')
             .eq('organization_id', orgId)
             .eq('channel', 'whatsapp')
-            .eq('contact_id', phoneContact)
+            .eq('contact_id', phone)
             .maybeSingle();
 
         let conversationId: string;
 
         if (existingConv) {
             conversationId = existingConv.id;
-            await supabase
-                .from('inbox_conversations')
+            await supabase.from('inbox_conversations')
                 .update({ updated_at: new Date().toISOString() })
                 .eq('id', conversationId);
         } else {
@@ -164,18 +216,18 @@ export async function POST(request: NextRequest) {
                 .insert({
                     organization_id: orgId,
                     channel: 'whatsapp',
-                    contact_id: phoneContact,
+                    contact_id: phone,
                     status: 'pending',
                     origin_id: originId,
                 })
                 .select('id')
                 .single();
 
-            if (convErr || !newConv) throw new Error(convErr?.message || 'Failed to create conversation');
+            if (convErr || !newConv) throw new Error(convErr?.message || 'Falha ao criar conversa');
             conversationId = newConv.id;
         }
 
-        // 4. Save message
+        // Salvar mensagem
         await supabase.from('messages').insert({
             organization_id: orgId,
             conversation_id: conversationId,
@@ -183,7 +235,7 @@ export async function POST(request: NextRequest) {
             body: messageText,
         });
 
-        console.log('[WA webhook] message saved, conv:', conversationId);
+        console.log('[WA] mensagem salva, conv:', conversationId, '| contato:', phone);
         return NextResponse.json({ success: true, conversationId });
 
     } catch (error: any) {

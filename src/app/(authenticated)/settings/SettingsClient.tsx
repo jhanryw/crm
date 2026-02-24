@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { connectWhatsApp, syncWhatsAppStatus, getIntegrations, addOrigin, deleteOrigin } from '@/app/actions/settings';
-import { CheckCircle, Wifi, WifiOff, Loader2, ExternalLink, RefreshCw, Trash2 } from 'lucide-react';
+import { connectWhatsApp, syncWhatsAppStatus, importWhatsAppChats, getIntegrations, addOrigin, deleteOrigin } from '@/app/actions/settings';
+import { CheckCircle, Wifi, WifiOff, Loader2, ExternalLink, RefreshCw, Trash2, Download } from 'lucide-react';
 
 function toImgSrc(raw: string | null | undefined): string | null {
     if (!raw) return null;
@@ -49,6 +49,7 @@ export default function SettingsClient({ initialIntegrations, initialOrigins, in
     const [originRegex, setOriginRegex] = useState('');
     const [loadingWhatsapp, setLoadingWhatsapp] = useState(false);
     const [syncingWhatsapp, setSyncingWhatsapp] = useState(false);
+    const [importingChats, setImportingChats] = useState(false);
     const [waError, setWaError] = useState('');
     const [waSuccess, setWaSuccess] = useState('');
     const [qrCode, setQrCode] = useState<string | null>(null);
@@ -101,6 +102,22 @@ export default function SettingsClient({ initialIntegrations, initialOrigins, in
             if (result.status === 'connected') setQrCode(null);
         }
         setSyncingWhatsapp(false);
+    };
+
+    const handleImportChats = async () => {
+        setImportingChats(true); setWaError(''); setWaSuccess('');
+        const result = await importWhatsAppChats();
+        if (!result.success) {
+            setWaError(result.error);
+        } else {
+            const { imported, skipped, errors } = result;
+            setWaSuccess(
+                imported === 0
+                    ? `Nenhuma conversa nova encontrada (${skipped} já existiam).`
+                    : `✅ ${imported} conversa${imported > 1 ? 's' : ''} importada${imported > 1 ? 's' : ''}!${skipped > 0 ? ` (${skipped} já existiam)` : ''}${errors > 0 ? ` • ${errors} erro(s)` : ''}`
+            );
+        }
+        setImportingChats(false);
     };
 
     const handleAddOrigin = async (e: React.FormEvent) => {
@@ -179,6 +196,16 @@ export default function SettingsClient({ initialIntegrations, initialOrigins, in
                             className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700 transition-colors disabled:opacity-50"
                         >
                             {syncingWhatsapp ? <><Loader2 size={14} className="animate-spin" /> Sincronizando...</> : <><RefreshCw size={14} /> Sincronizar Status</>}
+                        </button>
+
+                        <button
+                            disabled={importingChats}
+                            onClick={handleImportChats}
+                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700 transition-colors disabled:opacity-50"
+                        >
+                            {importingChats
+                                ? <><Loader2 size={14} className="animate-spin" /> Importando conversas...</>
+                                : <><Download size={14} /> Importar Todas as Conversas</>}
                         </button>
                     </div>
 
