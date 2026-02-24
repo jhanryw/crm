@@ -40,13 +40,9 @@ export async function appendEvent(event: EventPayload) {
 async function processConversions(event: EventPayload) {
     try {
         if (event.event_name === 'stage_changed' || event.event_name === 'lead_created') {
-            const leadId = event.event_name === 'lead_created' ? event.entity_id : event.payload?.lead_id;
-
-            // Parallel execution
-            await Promise.all([
-                sendFacebookConversion(event.event_name, leadId, event.payload),
-                sendGA4Conversion(event.event_name, leadId, event.payload)
-            ]);
+            // GA4 stub still uses old signature
+            await sendGA4Conversion(event.event_name, event.entity_id, event.payload);
+            // Facebook CAPI is now handled directly in updateLeadStageWithSale action
         }
     } catch (error) {
         console.error('Conversion processing error:', error);

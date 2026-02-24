@@ -1,4 +1,4 @@
-import { getIntegrations, getOrigins } from '@/app/actions/settings';
+import { getIntegrations, getOrigins, getStages, getFacebookPixelConfig } from '@/app/actions/settings';
 import SettingsClient from './SettingsClient';
 
 interface SearchParams {
@@ -9,9 +9,11 @@ interface SearchParams {
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
     const params = await searchParams;
 
-    const [integrations, origins] = await Promise.all([
+    const [integrations, origins, stages, pixelConfig] = await Promise.all([
         getIntegrations().catch(() => []),
         getOrigins().catch(() => []),
+        getStages().catch(() => []),
+        getFacebookPixelConfig().catch(() => null),
     ]);
 
     return (
@@ -20,6 +22,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <SettingsClient
                 initialIntegrations={integrations}
                 initialOrigins={origins}
+                initialStages={stages}
+                pixelConfig={pixelConfig}
                 instagramError={params.instagram_error}
                 instagramSuccess={!!params.instagram_success}
             />

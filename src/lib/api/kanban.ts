@@ -59,6 +59,7 @@ export async function getLeads() {
     const { data, error } = await supabase
         .from('leads')
         .select('*')
+        .neq('status', 'lost')          // Ocultar leads perdidos do kanban
         .order('created_at', { ascending: false });
 
     if (error) throw error;

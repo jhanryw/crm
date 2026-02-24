@@ -10,6 +10,19 @@ interface Props {
     orgId: string;
 }
 
+function formatContactDisplay(contactId: string): string {
+    if (!contactId) return 'Contato desconhecido';
+    if (/^\d{10,15}$/.test(contactId)) {
+        const d = contactId;
+        if (d.startsWith('55') && d.length === 13)
+            return `+55 (${d.slice(2, 4)}) ${d.slice(4, 9)}-${d.slice(9)}`;
+        if (d.startsWith('55') && d.length === 12)
+            return `+55 (${d.slice(2, 4)}) ${d.slice(4, 8)}-${d.slice(8)}`;
+        return `+${d}`;
+    }
+    return contactId;
+}
+
 function formatTime(dateStr: string) {
     const d = new Date(dateStr);
     const now = new Date();
@@ -237,7 +250,7 @@ export default function InboxClient({ initialConversations, orgId }: Props) {
                                         <ChannelBadge channel={c.channel} />
                                         <span className="text-xs text-gray-400">{formatTime(c.updated_at)}</span>
                                     </div>
-                                    <h4 className="font-semibold text-gray-800 text-sm truncate">{c.contact_id}</h4>
+                                    <h4 className="font-semibold text-gray-800 text-sm truncate">{formatContactDisplay(c.contact_id)}</h4>
                                     <p className="text-xs text-gray-500 truncate mt-0.5">
                                         {c.lead_origins?.name || 'Origem desconhecida'}
                                     </p>
@@ -286,7 +299,7 @@ export default function InboxClient({ initialConversations, orgId }: Props) {
                                         : <Phone size={17} style={{ color: '#1fc2a9' }} />}
                                 </div>
                                 <div className="min-w-0">
-                                    <h3 className="font-bold text-gray-800 truncate">{selectedConv.contact_id}</h3>
+                                    <h3 className="font-bold text-gray-800 truncate">{formatContactDisplay(selectedConv.contact_id)}</h3>
                                     <p className="text-xs text-gray-500">{selectedConv.lead_origins?.name || 'Origem desconhecida'}</p>
                                 </div>
                             </div>

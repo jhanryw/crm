@@ -247,8 +247,8 @@ export async function importWhatsAppChats(): Promise<
         let imported = 0, skipped = 0, errors = 0;
 
         for (const chat of chats) {
-            // remoteJid pode estar em chat.id ou chat.remoteJid
-            const remoteJid: string = chat.id || chat.remoteJid || '';
+            // Evolution API v2 usa remoteJid; chat.id pode ser um hash interno
+            const remoteJid: string = chat.remoteJid || chat.id || '';
 
             // Pular grupos, broadcast e listas
             if (!remoteJid
@@ -421,5 +421,201 @@ export async function deleteOrigin(id: string): Promise<
         return { success: true };
     } catch (e: any) {
         return { success: false, error: e?.message || 'Erro ao excluir origem.' };
+    }
+}
+
+// ── STAGE MANAGEMENT ──────────────────────────────────────────────────────────
+
+const DEFAULT_STAGES = [
+    { name: 'Novo Lead', order_index: 0 },
+    { name: 'Em Negociação', order_index: 1 },
+    { name: 'Venda realizada', order_index: 2 },
+];
+
+export async function getStages() {
+    const { orgId } = await requireAuth();
+    const supabase = getServiceSupabase();
+
+    let { data: stages } = await supabase
+        .from('stages')
+        .select('*')
+        .eq('organization_id', orgId)
+        .order('order_index', { ascending: true });
+
+    // Auto-create default stages if none exist
+    if (!stages || stages.length === 0) {
+        const toInsert = DEFAULT_STAGES.map(s => ({ ...s, organization_id: orgId }));
+        const { data: created } = await supabase
+            .from('stages')
+            .insert(toInsert)
+            .select();
+        stages = created || [];
+        revalidatePath('/settings');
+        revalidatePath('/kanban');
+    }
+
+    return stages || [];
+}
+
+export async function createStage(name: string): Promise<
+    { success: true; stage: any } | { success: false; error: string }
+> {
+    try {
+        const { orgId, role } = await requireAuth();
+        if (role === 'salesperson') return { success: false, error: 'Sem permissão.' };
+
+        const supabase = getServiceSupabase();
+
+        // Get max order_index
+        const { data: existing } = await supabase
+            .from('stages')
+            .select('order_index')
+            .eq('organization_id', orgId)
+            .order('order_index', { ascending: false })
+            .limit(1);
+
+        const nextIndex = (existing?.[0]?.order_index ?? -1) + 1;
+
+        const { data: stage, error } = await supabase
+            .from('stages')
+            .insert({ organization_id: orgId, name: name.trim(), order_index: nextIndex })
+            .select()
+            .single();
+
+        if (error) return { success: false, error: error.message };
+
+        revalidatePath('/settings');
+        revalidatePath('/kanban');
+        return { success: true, stage };
+    } catch (e: any) {
+        return { success: false, error: e?.message || 'Erro ao criar estágio.' };
+    }
+}
+
+export async function deleteStage(id: string): Promise<
+    { success: true } | { success: false; error: string }
+> {
+    try {
+        const { orgId, role } = await requireAuth();
+        if (role === 'salesperson') return { success: false, error: 'Sem permissão.' };
+
+        const supabase = getServiceSupabase();
+
+        // Check if stage has leads
+        const { count } = await supabase
+            .from('leads')
+            .select('id', { count: 'exact', head: true })
+            .eq('stage_id', id)
+            .eq('organization_id', orgId)
+            .neq('status', 'lost');
+
+        if (count && count > 0) {
+            return {
+                success: false,
+                error: `Este estágio possui ${count} lead${count > 1 ? 's' : ''}. Mova-os primeiro.`,
+            };
+        }
+
+        const { error } = await supabase
+            .from('stages')
+            .delete()
+            .eq('id', id)
+            .eq('organization_id', orgId);
+
+        if (error) return { success: false, error: error.message };
+
+        revalidatePath('/settings');
+        revalidatePath('/kanban');
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e?.message || 'Erro ao excluir estágio.' };
+    }
+}
+
+// ── FACEBOOK PIXEL CONFIG ─────────────────────────────────────────────────────
+
+export async function getFacebookPixelConfig() {
+    const { orgId } = await requireAuth();
+    const { data } = await getServiceSupabase()
+        .from('integrations')
+        .select('config')
+        .eq('organization_id', orgId)
+        .eq('channel', 'facebook_pixel')
+        .maybeSingle();
+    return data?.config || null;
+}
+
+export async function saveFacebookPixelConfig(
+    pixelId: string,
+    accessToken: string,
+    testEventCode: string
+): Promise<{ success: true } | { success: false; error: string }> {
+    try {
+        const { orgId, role } = await requireAuth();
+        if (role === 'salesperson') return { success: false, error: 'Sem permissão.' };
+
+        const config = {
+            pixelId: pixelId.trim(),
+            accessToken: accessToken.trim(),
+            testEventCode: testEventCode.trim() || null,
+        };
+
+        const { error } = await getServiceSupabase()
+            .from('integrations')
+            .upsert(
+                { organization_id: orgId, channel: 'facebook_pixel', status: 'connected', config },
+                { onConflict: 'organization_id,channel' }
+            );
+
+        if (error) return { success: false, error: error.message };
+
+        revalidatePath('/settings');
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e?.message || 'Erro ao salvar configuração.' };
+    }
+}
+
+export async function testFacebookPixelEvent(): Promise<
+    { success: boolean; message: string; rawResponse?: any }
+> {
+    try {
+        const { orgId } = await requireAuth();
+        const { data } = await getServiceSupabase()
+            .from('integrations')
+            .select('config')
+            .eq('organization_id', orgId)
+            .eq('channel', 'facebook_pixel')
+            .maybeSingle();
+
+        if (!data?.config?.pixelId || !data?.config?.accessToken) {
+            return { success: false, message: 'Configure o Pixel ID e Access Token primeiro.' };
+        }
+
+        const { sendFacebookConversion } = await import('@/lib/conversions/facebook');
+        const result = await sendFacebookConversion({
+            pixelId: data.config.pixelId,
+            accessToken: data.config.accessToken,
+            testEventCode: data.config.testEventCode || undefined,
+            leadId: `test-${Date.now()}`,
+            value: 1,
+            currency: 'BRL',
+        });
+
+        if (result.success) {
+            return {
+                success: true,
+                message: `✅ Evento enviado com sucesso! (${result.eventsReceived ?? 1} recebido pelo Meta)`,
+                rawResponse: result.rawResponse,
+            };
+        } else {
+            return {
+                success: false,
+                message: `❌ Erro: ${result.error}`,
+                rawResponse: result.rawResponse,
+            };
+        }
+    } catch (e: any) {
+        return { success: false, message: e?.message || 'Erro inesperado.' };
     }
 }

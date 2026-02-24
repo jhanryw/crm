@@ -168,12 +168,9 @@ export async function approveConversationAsLead(conversationId: string) {
     // Se não existir nenhum estágio, criar o padrão automaticamente
     if (!stage) {
         const defaultStages = [
-            { name: 'Lead novo',     order_index: 0, organization_id: orgId },
-            { name: 'Em contato',    order_index: 1, organization_id: orgId },
-            { name: 'Proposta',      order_index: 2, organization_id: orgId },
-            { name: 'Negociação',    order_index: 3, organization_id: orgId },
-            { name: 'Ganho',         order_index: 4, organization_id: orgId },
-            { name: 'Perdido',       order_index: 5, organization_id: orgId },
+            { name: 'Novo Lead',        order_index: 0, organization_id: orgId },
+            { name: 'Em Negociação',    order_index: 1, organization_id: orgId },
+            { name: 'Venda realizada',  order_index: 2, organization_id: orgId },
         ];
         const { data: created } = await supabase
             .from('stages')

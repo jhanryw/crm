@@ -1,14 +1,26 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { X, Phone, User, DollarSign, Clock, ChevronRight, Edit2, Check } from 'lucide-react';
+import { X, Phone, User, DollarSign, Clock, ChevronRight, Edit2, Check, XCircle } from 'lucide-react';
 import { getLead, updateLeadValue, LeadDetail, Stage } from '@/lib/api/kanban';
+import { markLeadAsLost } from '@/app/actions/kanban';
+
+const LOSS_REASONS = [
+    'Preço alto',
+    'Comprou na concorrência',
+    'Sem orçamento no momento',
+    'Sem interesse',
+    'Não retornou o contato',
+    'Mudou de ideia',
+    'Outros',
+];
 
 interface Props {
     leadId: string;
     stages: Stage[];
     onClose: () => void;
     onValueUpdated: (leadId: string, value: number) => void;
+    onLeadLost?: (leadId: string) => void;
 }
 
 function timeAgo(dateStr: string) {
@@ -35,12 +47,18 @@ function ChannelBadge({ source }: { source?: string }) {
     );
 }
 
-export default function LeadDetailPanel({ leadId, stages, onClose, onValueUpdated }: Props) {
+export default function LeadDetailPanel({ leadId, stages, onClose, onValueUpdated, onLeadLost }: Props) {
     const [lead, setLead] = useState<LeadDetail | null>(null);
     const [loading, setLoading] = useState(true);
     const [editingValue, setEditingValue] = useState(false);
     const [valueInput, setValueInput] = useState('');
     const [savingValue, setSavingValue] = useState(false);
+
+    // Lost modal state
+    const [showLostModal, setShowLostModal] = useState(false);
+    const [lostReason, setLostReason] = useState(LOSS_REASONS[0]);
+    const [markingLost, setMarkingLost] = useState(false);
+    const [lostError, setLostError] = useState('');
 
     useEffect(() => {
         getLead(leadId).then(data => {
@@ -61,6 +79,16 @@ export default function LeadDetailPanel({ leadId, stages, onClose, onValueUpdate
             onValueUpdated(leadId, newValue);
             setEditingValue(false);
         } finally { setSavingValue(false); }
+    };
+
+    const handleConfirmLost = async () => {
+        setMarkingLost(true); setLostError('');
+        const result = await markLeadAsLost(leadId, lostReason);
+        if (!result.success) { setLostError(result.error); setMarkingLost(false); return; }
+        setShowLostModal(false);
+        setMarkingLost(false);
+        onLeadLost?.(leadId);
+        onClose();
     };
 
     const getStageName = (stageId: string) => stages.find(s => s.id === stageId)?.name || stageId;
@@ -190,7 +218,7 @@ export default function LeadDetailPanel({ leadId, stages, onClose, onValueUpdate
                     </div>
 
                     {/* Histórico */}
-                    <div className="p-5">
+                    <div className="p-5 border-b border-gray-100">
                         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider block mb-3">Histórico</span>
                         {lead.deals_history && lead.deals_history.length > 0 ? (
                             <div className="space-y-3">
@@ -211,6 +239,60 @@ export default function LeadDetailPanel({ leadId, stages, onClose, onValueUpdate
                         ) : (
                             <p className="text-gray-400 text-sm">Nenhuma movimentação ainda.</p>
                         )}
+                    </div>
+
+                    {/* Ação Perdido */}
+                    <div className="p-5">
+                        <button
+                            onClick={() => { setLostReason(LOSS_REASONS[0]); setLostError(''); setShowLostModal(true); }}
+                            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium border border-red-200 text-red-500 hover:bg-red-50 hover:border-red-300 transition-colors"
+                        >
+                            <XCircle size={15} /> Marcar como Perdido
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* ── Modal Perdido ─────────────────────────────────────────────────── */}
+            {showLostModal && (
+                <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => { if (!markingLost) setShowLostModal(false); }}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-2">
+                            <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
+                                <XCircle size={18} className="text-red-500" /> Marcar como Perdido
+                            </h3>
+                            {!markingLost && (
+                                <button onClick={() => setShowLostModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100"><X size={16} className="text-gray-500" /></button>
+                            )}
+                        </div>
+                        <p className="text-sm text-gray-500 mb-4">Selecione o motivo para identificar padrões de perda.</p>
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1.5">Motivo da Perda</label>
+                                <select
+                                    value={lostReason}
+                                    onChange={e => setLostReason(e.target.value)}
+                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-800"
+                                    style={{ outline: 'none' }}
+                                    onFocus={e => (e.target as HTMLSelectElement).style.borderColor = '#ef4444'}
+                                    onBlur={e => (e.target as HTMLSelectElement).style.borderColor = '#e5e7eb'}
+                                >
+                                    {LOSS_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                                </select>
+                            </div>
+                            {lostError && <p className="text-red-500 text-sm bg-red-50 px-3 py-2 rounded-lg border border-red-100">{lostError}</p>}
+                            <div className="flex gap-3 pt-1">
+                                <button onClick={() => setShowLostModal(false)} disabled={markingLost} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 text-sm font-medium disabled:opacity-50">Cancelar</button>
+                                <button
+                                    onClick={handleConfirmLost} disabled={markingLost}
+                                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 transition-colors"
+                                >
+                                    {markingLost
+                                        ? <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Salvando...</>
+                                        : 'Confirmar Perda'}
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

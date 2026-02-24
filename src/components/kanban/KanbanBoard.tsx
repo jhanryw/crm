@@ -1,11 +1,22 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { X, Plus, Phone, User } from 'lucide-react';
+import { X, Plus, Phone, User, XCircle, TrendingUp } from 'lucide-react';
 import { getStages, getLeads, updateLeadStage, createLead, Stage, Lead } from '@/lib/api/kanban';
+import { markLeadAsLost, updateLeadStageWithSale } from '@/app/actions/kanban';
 import LeadDetailPanel from './LeadDetailPanel';
 
 interface Props { userId: string; }
+
+const LOSS_REASONS = [
+    'Preço alto',
+    'Comprou na concorrência',
+    'Sem orçamento no momento',
+    'Sem interesse',
+    'Não retornou o contato',
+    'Mudou de ideia',
+    'Outros',
+];
 
 function timeAgo(dateStr?: string) {
     if (!dateStr) return '';
@@ -42,6 +53,23 @@ export default function KanbanBoard({ userId }: Props) {
     const [creating, setCreating] = useState(false);
     const [formError, setFormError] = useState('');
 
+    // ── Venda Realizada modal ──────────────────────────────────────────────────
+    const [showSaleModal, setShowSaleModal] = useState(false);
+    const [saleLeadId, setSaleLeadId] = useState('');
+    const [saleTargetStageId, setSaleTargetStageId] = useState('');
+    const [saleOldStageId, setSaleOldStageId] = useState('');
+    const [saleValue, setSaleValue] = useState('');
+    const [saleSaving, setSaleSaving] = useState(false);
+    const [saleError, setSaleError] = useState('');
+    const [saleSuccess, setSaleSuccess] = useState('');
+
+    // ── Perdido modal ──────────────────────────────────────────────────────────
+    const [showLostModal, setShowLostModal] = useState(false);
+    const [lostLeadId, setLostLeadId] = useState('');
+    const [lostReason, setLostReason] = useState(LOSS_REASONS[0]);
+    const [markingLost, setMarkingLost] = useState(false);
+    const [lostError, setLostError] = useState('');
+
     useEffect(() => {
         async function fetchData() {
             try {
@@ -70,7 +98,23 @@ export default function KanbanBoard({ userId }: Props) {
         e.preventDefault();
         if (!draggingLeadId) return;
         const lead = leads.find(l => l.id === draggingLeadId);
-        if (!lead || lead.stage_id === targetStageId) return;
+        if (!lead || lead.stage_id === targetStageId) { setDraggingLeadId(null); return; }
+
+        const targetStage = stages.find(s => s.id === targetStageId);
+        const isSaleStage = targetStage?.name.toLowerCase().includes('venda');
+
+        if (isSaleStage) {
+            setSaleLeadId(draggingLeadId);
+            setSaleTargetStageId(targetStageId);
+            setSaleOldStageId(lead.stage_id);
+            setSaleValue(String(lead.value || ''));
+            setSaleError('');
+            setSaleSuccess('');
+            setShowSaleModal(true);
+            setDraggingLeadId(null);
+            return;
+        }
+
         const oldStageId = lead.stage_id;
         setLeads(prev => prev.map(l => l.id === draggingLeadId ? { ...l, stage_id: targetStageId } : l));
         try {
@@ -80,6 +124,36 @@ export default function KanbanBoard({ userId }: Props) {
         } finally {
             setDraggingLeadId(null);
         }
+    };
+
+    const handleConfirmSale = async () => {
+        const numVal = parseFloat(saleValue.replace(',', '.'));
+        if (!numVal || numVal <= 0) { setSaleError('Informe o valor da negociação para continuar.'); return; }
+        setSaleSaving(true); setSaleError('');
+        const result = await updateLeadStageWithSale(saleLeadId, saleTargetStageId, saleOldStageId, userId, numVal);
+        if (!result.success) { setSaleError(result.error); setSaleSaving(false); return; }
+        setLeads(prev => prev.map(l => l.id === saleLeadId ? { ...l, stage_id: saleTargetStageId, value: numVal } : l));
+        setSaleSuccess(result.facebookSent ? '✅ Venda registrada e evento enviado ao Facebook!' : '✅ Venda registrada com sucesso!');
+        setSaleSaving(false);
+        setTimeout(() => { setShowSaleModal(false); setSaleSuccess(''); }, 2000);
+    };
+
+    const openLostModal = (leadId: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setLostLeadId(leadId);
+        setLostReason(LOSS_REASONS[0]);
+        setLostError('');
+        setShowLostModal(true);
+    };
+
+    const handleConfirmLost = async () => {
+        setMarkingLost(true); setLostError('');
+        const result = await markLeadAsLost(lostLeadId, lostReason);
+        if (!result.success) { setLostError(result.error); setMarkingLost(false); return; }
+        setLeads(prev => prev.filter(l => l.id !== lostLeadId));
+        if (selectedLeadId === lostLeadId) setSelectedLeadId(null);
+        setShowLostModal(false);
+        setMarkingLost(false);
     };
 
     const openNewLeadModal = (stageId?: string) => {
@@ -141,6 +215,7 @@ export default function KanbanBoard({ userId }: Props) {
                     const stageLeads = leads.filter(l => l.stage_id === stage.id);
                     const totalValue = stageLeads.reduce((s, l) => s + (l.value || 0), 0);
                     const accentColor = STAGE_COLORS[idx % STAGE_COLORS.length];
+                    const isSaleStage = stage.name.toLowerCase().includes('venda');
 
                     return (
                         <div
@@ -156,7 +231,10 @@ export default function KanbanBoard({ userId }: Props) {
                             {/* Cabeçalho */}
                             <div className="px-4 py-3 bg-white border-b border-gray-100">
                                 <div className="flex justify-between items-center">
-                                    <h3 className="font-semibold text-gray-800 text-sm">{stage.name}</h3>
+                                    <h3 className="font-semibold text-gray-800 text-sm flex items-center gap-1.5">
+                                        {isSaleStage && <TrendingUp size={13} style={{ color: accentColor }} />}
+                                        {stage.name}
+                                    </h3>
                                     <span
                                         className="text-xs font-bold px-2 py-0.5 rounded-full"
                                         style={{ background: `${accentColor}20`, color: accentColor }}
@@ -179,12 +257,21 @@ export default function KanbanBoard({ userId }: Props) {
                                             draggable
                                             onDragStart={e => onDragStart(e, lead.id)}
                                             onClick={() => setSelectedLeadId(lead.id)}
-                                            className="bg-white rounded-xl px-4 py-3.5 border border-gray-100 cursor-pointer transition-all"
+                                            className="bg-white rounded-xl px-4 py-3.5 border border-gray-100 cursor-pointer transition-all relative group"
                                             style={draggingLeadId === lead.id ? { opacity: 0.4, transform: 'scale(0.97)' } : {}}
                                             onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = '#1fc2a9'; (e.currentTarget as HTMLDivElement).style.boxShadow = '0 2px 12px rgba(31,194,169,0.12)'; }}
                                             onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = '#f3f4f6'; (e.currentTarget as HTMLDivElement).style.boxShadow = 'none'; }}
                                         >
-                                            <div className="flex justify-between items-start mb-2">
+                                            {/* Botão Perdido (hover) */}
+                                            <button
+                                                onClick={e => openLostModal(lead.id, e)}
+                                                title="Marcar como Perdido"
+                                                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-lg hover:bg-red-50 z-10"
+                                            >
+                                                <XCircle size={14} className="text-red-400" />
+                                            </button>
+
+                                            <div className="flex justify-between items-start mb-2 pr-5">
                                                 <div className="flex items-center gap-1.5 min-w-0">
                                                     <User size={12} className="text-gray-400 flex-shrink-0" />
                                                     <span className="text-sm font-semibold text-gray-800 truncate">
@@ -310,12 +397,121 @@ export default function KanbanBoard({ userId }: Props) {
                 </div>
             )}
 
+            {/* ── Modal Venda Realizada ─────────────────────────────────────── */}
+            {showSaleModal && (
+                <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => { if (!saleSaving) setShowSaleModal(false); }}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-2">
+                            <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                                <TrendingUp size={20} style={{ color: '#1fc2a9' }} /> Venda Realizada 🎉
+                            </h3>
+                            {!saleSaving && !saleSuccess && (
+                                <button onClick={() => setShowSaleModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100">
+                                    <X size={18} className="text-gray-500" />
+                                </button>
+                            )}
+                        </div>
+                        <p className="text-sm text-gray-500 mb-5">
+                            Informe o valor da negociação. Ele será enviado automaticamente ao Facebook Pixel como evento de compra.
+                        </p>
+                        {saleSuccess ? (
+                            <div className="p-4 rounded-xl text-center font-medium text-sm" style={{ background: '#e8faf7', color: '#107c65' }}>
+                                {saleSuccess}
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Valor da Negociação (R$) *</label>
+                                    <div className="relative">
+                                        <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 font-medium text-sm">R$</span>
+                                        <input
+                                            type="number" autoFocus min="0.01" step="0.01"
+                                            value={saleValue}
+                                            onChange={e => setSaleValue(e.target.value)}
+                                            placeholder="0,00"
+                                            className="w-full pl-10 pr-4 py-3 border rounded-xl text-sm text-gray-800 font-semibold"
+                                            style={{ outline: 'none', borderColor: '#1fc2a9' }}
+                                            onKeyDown={e => { if (e.key === 'Enter') handleConfirmSale(); }}
+                                        />
+                                    </div>
+                                </div>
+                                {saleError && <p className="text-red-500 text-sm bg-red-50 px-3 py-2 rounded-lg border border-red-100">{saleError}</p>}
+                                <div className="flex gap-3 pt-1">
+                                    <button onClick={() => setShowSaleModal(false)} disabled={saleSaving} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 text-sm font-medium disabled:opacity-50">Cancelar</button>
+                                    <button
+                                        onClick={handleConfirmSale} disabled={saleSaving}
+                                        className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2"
+                                        style={{ background: '#1fc2a9' }}
+                                        onMouseEnter={e => { if (!saleSaving) (e.currentTarget as HTMLButtonElement).style.background = '#107c65'; }}
+                                        onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = '#1fc2a9'}
+                                    >
+                                        {saleSaving
+                                            ? <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Registrando...</>
+                                            : '✓ Confirmar Venda'}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* ── Modal Perdido ─────────────────────────────────────────────────── */}
+            {showLostModal && (
+                <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => { if (!markingLost) setShowLostModal(false); }}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-2">
+                            <h3 className="text-base font-bold text-gray-800 flex items-center gap-2">
+                                <XCircle size={18} className="text-red-500" /> Marcar como Perdido
+                            </h3>
+                            {!markingLost && (
+                                <button onClick={() => setShowLostModal(false)} className="p-1.5 rounded-lg hover:bg-gray-100">
+                                    <X size={16} className="text-gray-500" />
+                                </button>
+                            )}
+                        </div>
+                        <p className="text-sm text-gray-500 mb-4">Selecione o motivo para identificar padrões de perda.</p>
+                        <div className="space-y-3">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1.5">Motivo da Perda</label>
+                                <select
+                                    value={lostReason}
+                                    onChange={e => setLostReason(e.target.value)}
+                                    className="w-full px-3.5 py-2.5 border border-gray-200 rounded-xl text-sm text-gray-800"
+                                    style={{ outline: 'none' }}
+                                    onFocus={e => (e.target as HTMLSelectElement).style.borderColor = '#ef4444'}
+                                    onBlur={e => (e.target as HTMLSelectElement).style.borderColor = '#e5e7eb'}
+                                >
+                                    {LOSS_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                                </select>
+                            </div>
+                            {lostError && <p className="text-red-500 text-sm bg-red-50 px-3 py-2 rounded-lg border border-red-100">{lostError}</p>}
+                            <div className="flex gap-3 pt-1">
+                                <button onClick={() => setShowLostModal(false)} disabled={markingLost} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 text-sm font-medium disabled:opacity-50">Cancelar</button>
+                                <button
+                                    onClick={handleConfirmLost} disabled={markingLost}
+                                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50 flex items-center justify-center gap-2 bg-red-500 hover:bg-red-600 transition-colors"
+                                >
+                                    {markingLost
+                                        ? <><div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> Salvando...</>
+                                        : 'Confirmar Perda'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {selectedLeadId && (
                 <LeadDetailPanel
                     leadId={selectedLeadId}
                     stages={stages}
                     onClose={() => setSelectedLeadId(null)}
                     onValueUpdated={(id, val) => setLeads(prev => prev.map(l => l.id === id ? { ...l, value: val } : l))}
+                    onLeadLost={(id) => {
+                        setLeads(prev => prev.filter(l => l.id !== id));
+                        setSelectedLeadId(null);
+                    }}
                 />
             )}
         </>
