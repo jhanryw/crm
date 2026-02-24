@@ -347,7 +347,24 @@ export default function InboxClient({ initialConversations, orgId }: Props) {
                                                 : { background: '#ffffff', color: '#111', border: '1px solid #e5e7eb', borderBottomLeftRadius: '4px' }
                                             }
                                         >
-                                            <p className="break-words">{msg.body}</p>
+                                            {/* Render audio */}
+                                            {msg.mime_type?.startsWith('audio/') ? (
+                                                <audio controls className="w-full max-w-xs mb-2">
+                                                    <source src={msg.media_url} type={msg.mime_type} />
+                                                    Seu navegador não suporta reprodução de áudio
+                                                </audio>
+                                            ) : msg.mime_type?.startsWith('image/') ? (
+                                                <img src={msg.media_url} alt="Imagem" className="max-w-xs rounded-lg mb-2" />
+                                            ) : msg.mime_type?.startsWith('video/') ? (
+                                                <video controls className="max-w-xs rounded-lg mb-2">
+                                                    <source src={msg.media_url} type={msg.mime_type} />
+                                                    Seu navegador não suporta reprodução de vídeo
+                                                </video>
+                                            ) : null}
+                                            {msg.body && <p className="break-words">{msg.body}</p>}
+                                            {!msg.body && msg.media_url && msg.mime_type && (
+                                                <p className="text-xs">{msg.mime_type.split('/')[0].toUpperCase()} 📎</p>
+                                            )}
                                             <p className="text-xs mt-1" style={msg.direction === 'out' ? { color: 'rgba(255,255,255,0.65)' } : { color: '#9ca3af' }}>
                                                 {formatTime(msg.created_at)}
                                             </p>

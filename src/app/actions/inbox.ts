@@ -80,20 +80,54 @@ async function sendWhatsAppMessage(orgId: string, contactId: string, text: strin
         return;
     }
 
-    // Buscar instanceName da integração da org
-    const { data: integration } = await getServiceSupabase()
-        .from('integrations')
-        .select('config, status')
+    const supabase = getServiceSupabase();
+
+    // Get conversation with its most recent WhatsApp instance
+    const { data: conv } = await supabase
+        .from('inbox_conversations')
+        .select('id, whatsapp_instance_id')
         .eq('organization_id', orgId)
+        .eq('contact_id', contactId)
         .eq('channel', 'whatsapp')
         .single();
 
-    if (!integration || integration.status !== 'connected') {
-        throw new Error("WhatsApp não está conectado. Configure em Definições.");
+    if (!conv) throw new Error('Conversa não encontrada');
+
+    let instanceName: string | undefined;
+
+    // Use instance from conversation (most recent message)
+    if (conv.whatsapp_instance_id) {
+        const { data: instance } = await supabase
+            .from('integrations')
+            .select('config')
+            .eq('id', conv.whatsapp_instance_id)
+            .single();
+        instanceName = instance?.config?.instanceName;
     }
 
-    const instanceName = integration.config?.instanceName;
-    if (!instanceName) throw new Error("instanceName não encontrado na configuração do WhatsApp.");
+    // Fall back to first connected instance if conversation has no instance yet
+    if (!instanceName) {
+        const { data: instance } = await supabase
+            .from('integrations')
+            .select('config, id')
+            .eq('organization_id', orgId)
+            .eq('channel', 'whatsapp')
+            .eq('status', 'connected')
+            .order('created_at', { ascending: true })
+            .limit(1)
+            .single();
+        instanceName = instance?.config?.instanceName;
+
+        // Update conversation with this instance for future messages
+        if (instance?.id) {
+            await supabase
+                .from('inbox_conversations')
+                .update({ whatsapp_instance_id: instance.id })
+                .eq('id', conv.id);
+        }
+    }
+
+    if (!instanceName) throw new Error('Nenhuma instância do WhatsApp conectada está disponível.');
 
     // Número no formato internacional sem o +
     const number = contactId.replace(/\D/g, '');
@@ -143,7 +177,7 @@ async function sendInstagramMessage(orgId: string, contactUsername: string, text
     }
 }
 
-export async function approveConversationAsLead(conversationId: string) {
+export async function approveConversationAsLead(conversationId: string, whatsappInstanceId?: string) {
     const { orgId, userId } = await requireAuth();
     const supabase = getServiceSupabase();
 
@@ -155,6 +189,9 @@ export async function approveConversationAsLead(conversationId: string) {
         .single();
 
     if (!conv) throw new Error('Conversa não encontrada');
+
+    // Use conversation's instance if available, or the provided one
+    const finalInstanceId = conv.whatsapp_instance_id || whatsappInstanceId;
 
     // Buscar primeiro estágio da org
     let { data: stage } = await supabase
@@ -204,6 +241,7 @@ export async function approveConversationAsLead(conversationId: string) {
             contact_phone: conv.channel === 'whatsapp' ? rawContact : null,
             value: 0,
             status: 'active',
+            whatsapp_instance_id: finalInstanceId || null,
         })
         .select()
         .single();

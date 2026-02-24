@@ -135,16 +135,28 @@ export async function POST(request: NextRequest) {
             || body.message
             || '';
 
-        if (!messageText) {
-            return NextResponse.json({ ignored: true, reason: 'no text content' });
+        // Extract media data (audio, video, image)
+        const mediaUrl: string = body.data?.message?.audioMessage?.url
+            || body.data?.message?.videoMessage?.url
+            || body.data?.message?.imageMessage?.url
+            || '';
+
+        const mimeType: string = body.data?.message?.audioMessage?.mimetype
+            || body.data?.message?.videoMessage?.mimetype
+            || body.data?.message?.imageMessage?.mimetype
+            || '';
+
+        // Ignore only if both text and media are missing
+        if (!messageText && !mediaUrl) {
+            return NextResponse.json({ ignored: true, reason: 'no text or media content' });
         }
 
         const phone = remoteJid.split('@')[0].split(':')[0];
 
-        // ── Encontrar org pela instância ──────────────────────────────────────
+        // ── Encontrar org e integração pela instância ──────────────────────────────────────
         const { data: integrations } = await supabase
             .from('integrations')
-            .select('organization_id, config')
+            .select('id, organization_id, config')
             .eq('channel', 'whatsapp')
             .filter('config->>instanceName', 'eq', instanceName);
 
@@ -155,6 +167,7 @@ export async function POST(request: NextRequest) {
         }
 
         const orgId = integration.organization_id;
+        const whatsappInstanceId = integration.id;
 
         // ── Se é mensagem enviada pelo celular (fromMe: true no MESSAGES_UPSERT):
         // Apenas atualiza a conversa — o CRM já salva quando envia pelo app.
@@ -207,8 +220,13 @@ export async function POST(request: NextRequest) {
 
         if (existingConv) {
             conversationId = existingConv.id;
+            // Update conversation with latest WhatsApp instance + timestamp
+            // This ensures replies go back to whoever messaged last
             await supabase.from('inbox_conversations')
-                .update({ updated_at: new Date().toISOString() })
+                .update({
+                    updated_at: new Date().toISOString(),
+                    whatsapp_instance_id: whatsappInstanceId,
+                })
                 .eq('id', conversationId);
         } else {
             const { data: newConv, error: convErr } = await supabase
@@ -219,6 +237,7 @@ export async function POST(request: NextRequest) {
                     contact_id: phone,
                     status: 'pending',
                     origin_id: originId,
+                    whatsapp_instance_id: whatsappInstanceId,
                 })
                 .select('id')
                 .single();
@@ -232,7 +251,9 @@ export async function POST(request: NextRequest) {
             organization_id: orgId,
             conversation_id: conversationId,
             direction: 'in',
-            body: messageText,
+            body: messageText || null,
+            mime_type: mimeType || null,
+            media_url: mediaUrl || null,
         });
 
         console.log('[WA] mensagem salva, conv:', conversationId, '| contato:', phone);

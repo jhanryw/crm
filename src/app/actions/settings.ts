@@ -81,7 +81,7 @@ export async function syncWhatsAppStatus(): Promise<
     }
 }
 
-export async function connectWhatsApp(): Promise<
+export async function connectWhatsApp(name: string = 'Principal'): Promise<
     { success: true; qrBase64: string | null; alreadyConnected?: boolean; [key: string]: any } |
     { success: false; error: string }
 > {
@@ -96,7 +96,9 @@ export async function connectWhatsApp(): Promise<
             return { success: false, error: 'Evolution API não configurada. Adicione EVOLUTION_API_URL e EVOLUTION_API_KEY no EasyPanel.' };
         }
 
-        const instanceName = `qarvon-${orgId.slice(0, 8)}`;
+        // Create unique instance name: qarvon-${orgId}-${name}
+        const baseName = name.toLowerCase().replace(/\s+/g, '-');
+        const instanceName = `qarvon-${orgId.slice(0, 8)}-${baseName}`;
         const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/whatsapp`;
         const webhookEvents = ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'SEND_MESSAGE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED'];
 
@@ -142,8 +144,8 @@ export async function connectWhatsApp(): Promise<
                 const { data, error } = await getServiceSupabase()
                     .from('integrations')
                     .upsert(
-                        { organization_id: orgId, channel: 'whatsapp', status: 'connected', config: { instanceName } },
-                        { onConflict: 'organization_id, channel' }
+                        { organization_id: orgId, channel: 'whatsapp', name, status: 'connected', config: { instanceName } },
+                        { onConflict: 'organization_id, channel, name' }
                     )
                     .select()
                     .single();
@@ -172,8 +174,8 @@ export async function connectWhatsApp(): Promise<
         const { data, error } = await getServiceSupabase()
             .from('integrations')
             .upsert(
-                { organization_id: orgId, channel: 'whatsapp', status: 'connecting', config: { instanceName, qrCode: qrBase64 } },
-                { onConflict: 'organization_id, channel' }
+                { organization_id: orgId, channel: 'whatsapp', name, status: 'connecting', config: { instanceName, qrCode: qrBase64 } },
+                { onConflict: 'organization_id, channel, name' }
             )
             .select()
             .single();
@@ -191,8 +193,9 @@ export async function connectWhatsApp(): Promise<
  * Importa TODOS os chats existentes do WhatsApp para o CRM.
  * Usa Evolution API /chat/findChats + /chat/findMessages.
  * Cria conversas + mensagens históricas no banco.
+ * @param whatsappInstanceId - Optional: specific instance to import from. If not provided, uses first instance.
  */
-export async function importWhatsAppChats(): Promise<
+export async function importWhatsAppChats(whatsappInstanceId?: string): Promise<
     { success: true; imported: number; skipped: number; errors: number } |
     { success: false; error: string }
 > {
@@ -204,8 +207,40 @@ export async function importWhatsAppChats(): Promise<
         const evolutionKey = process.env.EVOLUTION_API_KEY || '';
         if (!evolutionUrl || !evolutionKey) return { success: false, error: 'Evolution API não configurada.' };
 
-        const instanceName = `qarvon-${orgId.slice(0, 8)}`;
         const supabase = getServiceSupabase();
+
+        // Get the WhatsApp instance to import from
+        let integration: any;
+        if (whatsappInstanceId) {
+            const { data } = await supabase
+                .from('integrations')
+                .select('id, config')
+                .eq('id', whatsappInstanceId)
+                .eq('organization_id', orgId)
+                .eq('channel', 'whatsapp')
+                .single();
+            integration = data;
+        } else {
+            // If not specified, use first connected instance (or any if none connected)
+            const { data } = await supabase
+                .from('integrations')
+                .select('id, config')
+                .eq('organization_id', orgId)
+                .eq('channel', 'whatsapp')
+                .order('created_at', { ascending: true })
+                .limit(1)
+                .single();
+            integration = data;
+        }
+
+        if (!integration) {
+            return { success: false, error: 'Nenhuma instância WhatsApp encontrada.' };
+        }
+
+        const instanceName = integration.config?.instanceName;
+        if (!instanceName) {
+            return { success: false, error: 'instanceName não encontrado na integração.' };
+        }
 
         // ── 1. Buscar todos os chats na Evolution API ─────────────────────────
         const chatsRes = await fetch(`${evolutionUrl}/chat/findChats/${instanceName}`, {
@@ -322,6 +357,7 @@ export async function importWhatsAppChats(): Promise<
                         contact_id: phone,
                         status: 'pending',
                         origin_id: originId,
+                        whatsapp_instance_id: integration.id,
                     })
                     .select('id')
                     .single();
@@ -617,5 +653,85 @@ export async function testFacebookPixelEvent(): Promise<
         }
     } catch (e: any) {
         return { success: false, message: e?.message || 'Erro inesperado.' };
+    }
+}
+
+/**
+ * Get all WhatsApp instances for the organization
+ */
+export async function getWhatsAppInstances() {
+    const { orgId } = await requireAuth();
+    const supabase = getServiceSupabase();
+
+    const { data } = await supabase
+        .from('integrations')
+        .select('id, name, status, config, created_at')
+        .eq('organization_id', orgId)
+        .eq('channel', 'whatsapp')
+        .order('created_at', { ascending: true });
+
+    return data || [];
+}
+
+/**
+ * Disconnect and delete a WhatsApp instance
+ * Calls Evolution API to clean up the backend instance
+ */
+export async function disconnectWhatsApp(instanceId: string) {
+    try {
+        const { orgId, role } = await requireAuth();
+        if (role === 'salesperson') return { success: false, error: 'Sem permissão.' };
+
+        const supabase = getServiceSupabase();
+
+        // Get instance details
+        const { data: integration, error: fetchErr } = await supabase
+            .from('integrations')
+            .select('config, name')
+            .eq('id', instanceId)
+            .eq('organization_id', orgId)
+            .eq('channel', 'whatsapp')
+            .single();
+
+        if (fetchErr || !integration) {
+            return { success: false, error: 'WhatsApp não encontrado.' };
+        }
+
+        const instanceName = integration.config?.instanceName;
+        if (!instanceName) {
+            return { success: false, error: 'instanceName não encontrado na configuração.' };
+        }
+
+        // Try to delete from Evolution API (don't fail if it errors)
+        const evolutionUrl = process.env.EVOLUTION_API_URL || '';
+        const evolutionKey = process.env.EVOLUTION_API_KEY || '';
+
+        if (evolutionUrl && evolutionKey) {
+            try {
+                await fetch(`${evolutionUrl}/instance/delete/${instanceName}`, {
+                    method: 'DELETE',
+                    headers: { 'apikey': evolutionKey },
+                }).catch(() => null);
+            } catch (err) {
+                console.warn('[disconnectWA] Evolution API error:', err);
+            }
+        }
+
+        // Delete from database
+        const { error: deleteErr } = await supabase
+            .from('integrations')
+            .delete()
+            .eq('id', instanceId)
+            .eq('organization_id', orgId);
+
+        if (deleteErr) {
+            return { success: false, error: `Erro ao deletar: ${deleteErr.message}` };
+        }
+
+        revalidatePath('/settings');
+        revalidatePath('/inbox');
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e?.message || 'Erro ao desconectar WhatsApp.' };
     }
 }
