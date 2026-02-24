@@ -86,7 +86,8 @@ export async function POST(req: NextRequest) {
                     source: 'inbox_mock',
                     campaign_id: campaignId, // Attribute Campaign
                     stage_id: firstStage.id,
-                    value: 0
+                    value: 0,
+                    status: 'active'
                 }).select('id').single();
 
                 // Log Lead Creation Event

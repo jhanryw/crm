@@ -203,6 +203,7 @@ export async function approveConversationAsLead(conversationId: string) {
             contact_name: contactName,
             contact_phone: conv.channel === 'whatsapp' ? rawContact : null,
             value: 0,
+            status: 'active',
         })
         .select()
         .single();
