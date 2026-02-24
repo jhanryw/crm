@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { connectWhatsApp, getIntegrations, addOrigin, deleteOrigin } from '@/app/actions/settings';
-import { CheckCircle, Wifi, WifiOff, Loader2, ExternalLink } from 'lucide-react';
+import { connectWhatsApp, syncWhatsAppStatus, getIntegrations, addOrigin, deleteOrigin } from '@/app/actions/settings';
+import { CheckCircle, Wifi, WifiOff, Loader2, ExternalLink, RefreshCw } from 'lucide-react';
 
 /** Safely build a valid <img src> from raw base64 or an existing data URI */
 function toImgSrc(raw: string | null | undefined): string | null {
@@ -24,7 +24,9 @@ export default function SettingsClient({ initialIntegrations, initialOrigins, in
     const [originName, setOriginName] = useState('');
     const [originRegex, setOriginRegex] = useState('');
     const [loadingWhatsapp, setLoadingWhatsapp] = useState(false);
+    const [syncingWhatsapp, setSyncingWhatsapp] = useState(false);
     const [waError, setWaError] = useState('');
+    const [waSuccess, setWaSuccess] = useState('');
     const [qrCode, setQrCode] = useState<string | null>(null);
     const [originError, setOriginError] = useState('');
     const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -53,15 +55,41 @@ export default function SettingsClient({ initialIntegrations, initialOrigins, in
     const handleConnectWhatsapp = async () => {
         setLoadingWhatsapp(true);
         setWaError('');
+        setWaSuccess('');
         setQrCode(null);
         const result = await connectWhatsApp();
         if (!result.success) {
             setWaError(result.error);
         } else {
             setIntegrations(prev => [...prev.filter((i: any) => i.channel !== 'whatsapp'), result]);
-            if (result.qrBase64) setQrCode(result.qrBase64);
+            if (result.alreadyConnected) {
+                setWaSuccess('WhatsApp já estava conectado — status atualizado!');
+            } else if (result.qrBase64) {
+                setQrCode(result.qrBase64);
+            }
         }
         setLoadingWhatsapp(false);
+    };
+
+    const handleSyncWhatsapp = async () => {
+        setSyncingWhatsapp(true);
+        setWaError('');
+        setWaSuccess('');
+        const result = await syncWhatsAppStatus();
+        if (!result.success) {
+            setWaError(result.error);
+        } else {
+            setWaSuccess(
+                result.status === 'connected' ? '✅ Status sincronizado: Conectado!' :
+                result.status === 'disconnected' ? 'Status: Desconectado' :
+                'Status sincronizado: Aguardando QR'
+            );
+            // Refresh integrations list
+            const fresh = await getIntegrations();
+            setIntegrations(fresh);
+            if (result.status === 'connected') setQrCode(null);
+        }
+        setSyncingWhatsapp(false);
     };
 
     const handleAddOrigin = async (e: React.FormEvent) => {
@@ -134,6 +162,7 @@ export default function SettingsClient({ initialIntegrations, initialOrigins, in
                             </div>
                         )}
 
+                        {waSuccess && <p className="text-green-700 text-xs bg-green-50 p-2 rounded border border-green-200">{waSuccess}</p>}
                         {waError && <p className="text-red-500 text-xs bg-red-50 p-2 rounded border border-red-200">{waError}</p>}
 
                         <button
@@ -142,10 +171,21 @@ export default function SettingsClient({ initialIntegrations, initialOrigins, in
                             className="w-full py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                         >
                             {loadingWhatsapp
-                                ? <><Loader2 size={16} className="animate-spin" /> Gerando QR...</>
+                                ? <><Loader2 size={16} className="animate-spin" /> Verificando...</>
                                 : whatsappIntegration?.status === 'connecting' ? 'Gerar Novo QR Code'
                                     : whatsappIntegration?.status === 'connected' ? <><Wifi size={16} /> Reconectar</>
                                         : 'Conectar WhatsApp'}
+                        </button>
+
+                        {/* Sync button — for when already connected but CRM didn't detect it */}
+                        <button
+                            disabled={syncingWhatsapp}
+                            onClick={handleSyncWhatsapp}
+                            className="w-full py-2 border border-gray-300 hover:border-green-400 text-gray-600 hover:text-green-700 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                            {syncingWhatsapp
+                                ? <><Loader2 size={14} className="animate-spin" /> Sincronizando...</>
+                                : <><RefreshCw size={14} /> Sincronizar Status</>}
                         </button>
                     </div>
 
