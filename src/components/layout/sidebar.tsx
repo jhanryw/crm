@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   MessageSquare,
-  LayoutKanban,
+  Kanban,
   Users,
   BarChart3,
   Megaphone,
@@ -23,7 +23,7 @@ interface SidebarProps {
 
 const NAV_ITEMS = [
   { href: '/inbox', label: 'Inbox', icon: MessageSquare },
-  { href: '/pipeline', label: 'Pipeline', icon: LayoutKanban },
+  { href: '/pipeline', label: 'Pipeline', icon: Kanban },
   { href: '/leads', label: 'Leads', icon: Users },
   { href: '/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/campaigns', label: 'Campanhas', icon: Megaphone },
