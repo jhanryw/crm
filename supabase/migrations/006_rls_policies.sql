@@ -51,14 +51,33 @@ CREATE POLICY "workspaces_update" ON crm.workspaces
 CREATE POLICY "members_select" ON crm.workspace_members
   FOR SELECT USING (user_id = auth.uid());
 
--- Admins manage members of the same workspace
-CREATE POLICY "members_manage" ON crm.workspace_members
-  FOR ALL USING (
+-- Admins manage members of the same workspace (split by operation to avoid SELECT recursion)
+CREATE POLICY "members_insert" ON crm.workspace_members
+  FOR INSERT WITH CHECK (
     workspace_id IN (
-      SELECT wm.workspace_id
-      FROM crm.workspace_members wm
+      SELECT wm.workspace_id FROM crm.workspace_members wm
       WHERE wm.user_id = auth.uid()
-        AND wm.role IN ('owner','admin')
+        AND wm.role IN ('owner', 'admin')
+        AND wm.is_active = TRUE
+    )
+  );
+
+CREATE POLICY "members_update" ON crm.workspace_members
+  FOR UPDATE USING (
+    workspace_id IN (
+      SELECT wm.workspace_id FROM crm.workspace_members wm
+      WHERE wm.user_id = auth.uid()
+        AND wm.role IN ('owner', 'admin')
+        AND wm.is_active = TRUE
+    )
+  );
+
+CREATE POLICY "members_delete" ON crm.workspace_members
+  FOR DELETE USING (
+    workspace_id IN (
+      SELECT wm.workspace_id FROM crm.workspace_members wm
+      WHERE wm.user_id = auth.uid()
+        AND wm.role IN ('owner', 'admin')
         AND wm.is_active = TRUE
     )
   );
