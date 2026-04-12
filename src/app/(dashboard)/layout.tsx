@@ -14,12 +14,10 @@ export default async function DashboardLayout({
   if (!user) redirect('/login')
 
   // Load user's workspace membership
-  const { data: membership } = await supabase
+  const { data: membership } = await (supabase as any)
+    .schema('crm')
     .from('workspace_members')
-    .select(`
-      *,
-      workspace:workspaces(*)
-    `)
+    .select('*, workspace:workspaces(*)')
     .eq('user_id', user.id)
     .eq('is_active', true)
     .limit(1)
