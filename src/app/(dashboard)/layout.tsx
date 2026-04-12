@@ -14,7 +14,7 @@ export default async function DashboardLayout({
   if (!user) redirect('/login')
 
   // Load user's workspace membership
-  const { data: membership } = await (supabase as any)
+  const { data: membership, error: membershipError } = await (supabase as any)
     .schema('crm')
     .from('workspace_members')
     .select('*, workspace:workspaces(*)')
@@ -31,6 +31,11 @@ export default async function DashboardLayout({
           <p className="text-muted-foreground text-sm">
             Você não está em nenhum workspace. Contate o administrador.
           </p>
+          {membershipError && (
+            <pre className="mt-4 text-xs text-red-400 text-left bg-black/30 rounded p-3 max-w-lg">
+              {JSON.stringify(membershipError, null, 2)}
+            </pre>
+          )}
         </div>
       </div>
     )
