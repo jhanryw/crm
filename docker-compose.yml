@@ -1,0 +1,68 @@
+version: '3.9'
+
+# ============================================================
+# Qarvon CRM — Docker Compose (local development / VPS)
+# For Easypanel, use the individual Dockerfiles per service.
+# ============================================================
+
+services:
+  # ─── Next.js Web App ──────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL}
+    container_name: qarvon-crm-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+      - META_APP_SECRET=${META_APP_SECRET}
+      - META_VERIFY_TOKEN=${META_VERIFY_TOKEN}
+      - INSTAGRAM_APP_SECRET=${INSTAGRAM_APP_SECRET}
+      - INSTAGRAM_VERIFY_TOKEN=${INSTAGRAM_VERIFY_TOKEN}
+      - ERP_BASE_URL=${ERP_BASE_URL}
+      - ERP_WEBHOOK_SECRET=${ERP_WEBHOOK_SECRET}
+      - ERP_API_KEY=${ERP_API_KEY}
+    networks:
+      - crm-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── Background Workers ───────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: qarvon-crm-worker
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - META_PIXEL_ID=${META_PIXEL_ID}
+      - META_CAPI_ACCESS_TOKEN=${META_CAPI_ACCESS_TOKEN}
+      - META_TEST_EVENT_CODE=${META_TEST_EVENT_CODE}
+      - WORKER_SCORING_INTERVAL_MS=900000
+      - WORKER_CAPI_INTERVAL_MS=300000
+      - WORKER_TEMP_INTERVAL_MS=3600000
+      - WORKER_METRICS_INTERVAL_MS=3600000
+    networks:
+      - crm-network
+    depends_on:
+      - web
+
+networks:
+  crm-network:
+    driver: bridge

@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.env
+.env.local
+.env.*.local
+npm-debug.log*
+README.md
+ARCHITECTURE.md
+DATABASE.md
+WEBHOOKS.md
+DEPLOY.md
+.dockerignore
+docker-compose.yml

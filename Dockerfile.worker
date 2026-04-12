@@ -1,0 +1,19 @@
+# ============================================================
+# Qarvon CRM Worker — Background job processor
+# Deployed as a separate service in Easypanel.
+# ============================================================
+
+FROM node:20-alpine AS base
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci --legacy-peer-deps
+
+COPY . .
+
+ENV NODE_ENV=production
+
+# Worker runs via tsx (TypeScript runner)
+CMD ["npx", "tsx", "src/workers/index.ts"]
