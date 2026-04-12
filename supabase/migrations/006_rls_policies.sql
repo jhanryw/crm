@@ -31,7 +31,7 @@ RETURNS UUID[] AS $$
   SELECT ARRAY_AGG(workspace_id)
   FROM crm.workspace_members
   WHERE user_id = auth.uid() AND is_active = TRUE;
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+$$ LANGUAGE sql SECURITY DEFINER STABLE SET row_security = off;
 
 -- ─── CRM Policies ───────────────────────────────────────────
 
