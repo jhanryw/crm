@@ -47,15 +47,19 @@ CREATE POLICY "workspaces_update" ON crm.workspaces
     )
   );
 
--- workspace_members: members can see their team
+-- workspace_members: each user sees only their own memberships (avoids RLS recursion)
 CREATE POLICY "members_select" ON crm.workspace_members
-  FOR SELECT USING (workspace_id = ANY(crm.get_user_workspace_ids()));
+  FOR SELECT USING (user_id = auth.uid());
 
+-- Admins manage members of the same workspace
 CREATE POLICY "members_manage" ON crm.workspace_members
   FOR ALL USING (
     workspace_id IN (
-      SELECT workspace_id FROM crm.workspace_members
-      WHERE user_id = auth.uid() AND role IN ('owner','admin')
+      SELECT wm.workspace_id
+      FROM crm.workspace_members wm
+      WHERE wm.user_id = auth.uid()
+        AND wm.role IN ('owner','admin')
+        AND wm.is_active = TRUE
     )
   );
 
