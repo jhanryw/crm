@@ -145,3 +145,47 @@ O inbox usa Supabase Realtime para atualizações sem polling:
 - `messaging.messages` — novas mensagens na conversa aberta
 
 Os workers e routes de API usam o `service_role` client que bypassa RLS.
+
+---
+
+## API Routes
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| GET | `/api/health` | Health check |
+| PATCH | `/api/leads/[id]` | Atualiza estágio, responsável, valor, próxima ação, status |
+| PATCH | `/api/leads/[id]/stage` | Atualiza estágio (alias para pipeline drag-and-drop) |
+| POST | `/api/leads/[id]/notes` | Cria nota no lead |
+| POST | `/api/leads/[id]/tasks` | Cria tarefa no lead |
+| PATCH | `/api/leads/[id]/tasks/[taskId]` | Atualiza/completa tarefa |
+| DELETE | `/api/leads/[id]/tasks/[taskId]` | Remove tarefa |
+| POST | `/api/messages/send` | Envia mensagem via WhatsApp ou Instagram |
+| PATCH | `/api/conversations/[id]` | Marca lida, resolve, arquiva conversa |
+| GET/POST | `/api/webhooks/whatsapp` | Webhook Meta WhatsApp |
+| GET/POST | `/api/webhooks/instagram` | Webhook Instagram Direct |
+| POST | `/api/webhooks/erp` | Webhook ERP (vendas) |
+
+---
+
+## Workers
+
+| Worker | Frequência | Descrição |
+|--------|-----------|-----------|
+| `scoring-worker` | 15 min | Recalcula score e temperatura de todos os leads abertos |
+| `capi-flush-worker` | 5 min | Envia eventos CAPI pendentes para Meta, com retry e backoff exponencial |
+| `temperature-worker` | 1 hora | Gera alertas para leads quentes/em chamas sem resposta > 2h |
+| `metrics-worker` | 1 hora | Agrega métricas diárias: receita, leads, conversas, por canal e campanha |
+
+---
+
+## Tabelas Adicionais (migrations 010–015)
+
+| Tabela | Descrição |
+|--------|-----------|
+| `crm.tasks` | Tarefas por lead com prioridade, due date e responsável |
+| `crm.lead_notes` | Notas por lead com autor |
+| `crm.alerts` | Alertas de temperatura gerados pelo worker |
+| `crm.contact_merges` | Registro de merges de contatos duplicados |
+| `analytics.agent_daily_metrics` | Métricas diárias por atendente |
+| `analytics.creative_daily_metrics` | Métricas por criativo publicitário |
+| `capi_queue.event_logs` | Log de cada tentativa de envio CAPI |

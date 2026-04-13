@@ -9,11 +9,11 @@ Nunca acessa tabelas do schema `public` (ERP) diretamente.
 
 | Schema | Responsabilidade |
 |--------|-----------------|
-| `crm` | Workspaces, Contacts, Leads, Pipeline, Activities |
-| `messaging` | Channels, Conversations, Messages, Templates |
+| `crm` | Workspaces, Contacts, Leads, Pipeline, Activities, Tasks, Notes, Alerts, Contact Merges |
+| `messaging` | Channels, Conversations, Messages, Templates, Quick Replies |
 | `attribution` | Ad Accounts, Campaigns, Creatives, Touch Events |
-| `analytics` | Daily Metrics, Campaign Revenue |
-| `capi_queue` | Fila de eventos CAPI (Meta/Google) |
+| `analytics` | Daily Metrics, Campaign Revenue, Agent Daily Metrics, Creative Daily Metrics |
+| `capi_queue` | Fila de eventos CAPI (Meta/Google), Event Logs |
 
 ---
 
@@ -158,8 +158,16 @@ Arquivos em `supabase/migrations/`:
 |---------|---------|
 | `001_create_schemas.sql` | Criação dos schemas e trigger `set_updated_at` |
 | `002_crm_schema.sql` | Workspaces, Members, Contacts, Leads, Activities, ERP Events |
-| `003_messaging_schema.sql` | Channels, Conversations, Messages, Templates |
+| `003_messaging_schema.sql` | Channels, Conversations, Messages, Templates, Quick Replies |
 | `004_attribution_schema.sql` | Ad Accounts, Campaigns, Creatives, Touch Events |
 | `005_analytics_capi_schema.sql` | Daily Metrics, Campaign Revenue, CAPI Queue |
 | `006_rls_policies.sql` | Todas as políticas de RLS |
 | `007_seed_pipeline_stages.sql` | Estágios padrão por workspace |
+| `008_fix_members_rls.sql` | Correção RLS workspace_members |
+| `009_grant_table_permissions.sql` | Permissões por schema para authenticated e service_role |
+| `010_crm_tasks.sql` | Tarefas por lead (`crm.tasks`) |
+| `011_crm_lead_notes.sql` | Notas por lead (`crm.lead_notes`) |
+| `012_crm_alerts.sql` | Alertas de temperatura (`crm.alerts`) |
+| `013_analytics_extended.sql` | `analytics.agent_daily_metrics`, `analytics.creative_daily_metrics` |
+| `014_capi_event_logs.sql` | `capi_queue.event_logs` — audit trail de tentativas |
+| `015_contact_merges.sql` | `crm.contact_merges` — rastreio de merges de contatos |
