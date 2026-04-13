@@ -34,19 +34,15 @@ export function ConversationPanel({ conversation }: ConversationPanelProps) {
       .limit(100)
       .then(({ data }) => setMessages((data as Message[]) ?? []))
 
-    // Load lead
+    // Load lead (same-schema joins only to avoid ParserError)
     if (conversation.lead_id) {
       supabase
         .schema('crm')
         .from('leads')
-        .select(`
-          *,
-          stage:crm.pipeline_stages(name, color),
-          campaign:attribution.campaigns(name, platform)
-        `)
+        .select('*, stage:pipeline_stages(name, color)')
         .eq('id', conversation.lead_id)
         .single()
-        .then(({ data }) => setLead(data as Lead))
+        .then(({ data }) => setLead(data as unknown as Lead))
     }
 
     // Real-time messages
@@ -311,7 +307,7 @@ export function ConversationPanel({ conversation }: ConversationPanelProps) {
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Campanha</span>
                       <span className="text-xs truncate max-w-[140px]">
-                        {(lead.campaign as any).name}
+                        {(lead?.campaign as any)?.name}
                       </span>
                     </div>
                   )}

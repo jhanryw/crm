@@ -102,11 +102,12 @@ export interface Lead {
   notes: string | null
   created_at: string
   updated_at: string
-  // Joined
+  // Joined (optional — present only when explicitly selected)
   contact?: Contact
-  stage?: PipelineStage
-  assigned_member?: WorkspaceMember
-  campaign?: Campaign
+  stage?: PipelineStage | null
+  assigned_member?: WorkspaceMember | null
+  campaign?: Campaign | null
+  creative?: Creative | null
 }
 
 export interface LeadWithContext extends Lead {

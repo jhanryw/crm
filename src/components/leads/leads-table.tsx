@@ -1,16 +1,18 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Lead } from '@/types'
 import { formatCurrency, formatRelative, temperatureLabel, scoreColor, cn, formatPhone } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
-import { Flame, Star, Search, TrendingUp } from 'lucide-react'
+import { Flame, Star, Search } from 'lucide-react'
 
 interface LeadsTableProps {
   initialLeads: Lead[]
 }
 
 export function LeadsTable({ initialLeads }: LeadsTableProps) {
+  const router = useRouter()
   const [leads] = useState(initialLeads)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'all' | 'hot' | 'burning' | 'warm'>('all')
@@ -75,7 +77,11 @@ export function LeadsTable({ initialLeads }: LeadsTableProps) {
           </thead>
           <tbody className="divide-y divide-border">
             {filtered.map(lead => (
-              <tr key={lead.id} className="hover:bg-accent transition-colors cursor-pointer">
+              <tr
+                key={lead.id}
+                onClick={() => router.push(`/leads/${lead.id}`)}
+                className="hover:bg-accent transition-colors cursor-pointer"
+              >
                 <td className="px-6 py-3">
                   <div>
                     <p className="font-medium text-foreground">

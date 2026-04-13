@@ -12,31 +12,57 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
+// Local types for query results
+interface ScoredLead {
+  id: string
+  workspace_id: string
+  score: number
+  temperature: string
+  stage_id: string | null
+  contact_id: string
+  source: string | null
+  ctwa_clid: string | null
+  created_at: string
+  contact: {
+    phone: string | null
+    email: string | null
+    total_revenue: number
+    purchase_count: number
+    last_purchase_at: string | null
+  } | null
+  stage: {
+    position: number
+  } | null
+}
+
+interface ConvRow {
+  lead_id: string | null
+  last_message_at: string | null
+}
+
 export async function scoringWorker() {
   console.log('[ScoringWorker] Starting...')
 
   try {
-    // Get all open leads with context
-    const { data: leads, error } = await supabase
+    // Use same-schema relation names (no crm. prefix) to avoid TypeScript ParserError
+    const { data: rawLeads, error } = await supabase
       .schema('crm')
       .from('leads')
       .select(`
         id, workspace_id, score, temperature, stage_id, contact_id,
         source, ctwa_clid, created_at,
-        contact:crm.contacts(phone, email, total_revenue, purchase_count, last_purchase_at),
-        stage:crm.pipeline_stages(position),
-        last_message:messaging.conversations(
-          last_message_at,
-          messages:messaging.messages(id)
-        )
+        contact:contacts(phone, email, total_revenue, purchase_count, last_purchase_at),
+        stage:pipeline_stages(position)
       `)
       .eq('status', 'open')
       .limit(1000)
 
     if (error) throw error
-    if (!leads) return
+    if (!rawLeads) return
 
-    // Get max stage position per workspace (for relative scoring)
+    const leads = rawLeads as unknown as ScoredLead[]
+
+    // Get max stage position per workspace
     const { data: maxStages } = await supabase
       .schema('crm')
       .from('pipeline_stages')
@@ -50,24 +76,48 @@ export async function scoringWorker() {
       }
     }
 
+    // Batch-fetch last_message_at for all open leads (cross-schema, separate query)
+    const leadIds = leads.map(l => l.id)
+    const { data: rawConvs } = await supabase
+      .schema('messaging')
+      .from('conversations')
+      .select('lead_id, last_message_at')
+      .in('lead_id', leadIds)
+
+    const convs = (rawConvs ?? []) as ConvRow[]
+    const convMap = new Map<string, string>()
+    for (const c of convs) {
+      if (c.lead_id && c.last_message_at) {
+        const existing = convMap.get(c.lead_id)
+        if (!existing || c.last_message_at > existing) {
+          convMap.set(c.lead_id, c.last_message_at)
+        }
+      }
+    }
+
+    // Count messages per lead
+    const { data: rawMsgCounts } = await supabase
+      .schema('messaging')
+      .from('messages')
+      .select('conversation_id')
+      .in('conversation_id', convs.map(c => c.lead_id ?? '').filter(Boolean))
+
+    // Map lead → message count via conversations
+    const msgCount: Record<string, number> = {}
+    for (const c of convs) {
+      if (!c.lead_id) continue
+      msgCount[c.lead_id] = (rawMsgCounts ?? []).filter(
+        m => m.conversation_id === c.lead_id
+      ).length
+    }
+
     let updated = 0
 
     for (const lead of leads) {
       try {
-        const contact = lead.contact as any
-        const stage = lead.stage as any
-        const conversations = lead.last_message as any[]
-
-        // Find last message timestamp
-        const lastMsgAt = conversations
-          ?.flatMap(c => [c.last_message_at])
-          .filter(Boolean)
-          .sort()
-          .reverse()[0] ?? null
-
-        const messagesCount = conversations
-          ?.flatMap(c => c.messages ?? [])
-          .length ?? 0
+        const contact = lead.contact
+        const stage = lead.stage
+        const lastMsgAt = convMap.get(lead.id) ?? null
 
         const daysSinceLastMessage = lastMsgAt
           ? differenceInDays(new Date(), new Date(lastMsgAt))
@@ -82,7 +132,7 @@ export async function scoringWorker() {
           days_since_created: differenceInDays(new Date(), new Date(lead.created_at)),
           campaign_source: !!lead.source && lead.source !== 'organic',
           ctwa_clid: !!lead.ctwa_clid,
-          messages_count: messagesCount,
+          messages_count: msgCount[lead.id] ?? 0,
           stage_position: stage?.position ?? 0,
           max_stage_position: maxStageMap[lead.workspace_id] ?? 6,
         }
@@ -95,7 +145,6 @@ export async function scoringWorker() {
           contact?.purchase_count ?? 0
         )
 
-        // Only update if score changed
         if (score !== lead.score || temperature !== lead.temperature) {
           await supabase
             .schema('crm')

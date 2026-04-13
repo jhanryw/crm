@@ -53,24 +53,39 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ received: true })
 }
 
+// Local types for query results (no generated DB types)
+interface ContactRow {
+  id: string
+  workspace_id: string
+  name: string | null
+  phone: string | null
+}
+
+interface LeadRow {
+  id: string
+  stage_id: string | null
+  workspace_id: string
+  ctwa_clid: string | null
+}
+
 async function processERPEvent(event: ReturnType<typeof parseERPWebhookEvent>) {
   const supabase = createServiceClient()
   const { payload, event_type, event_id } = event
 
   try {
     // Find contact by phone or erp_customer_id
-    let contact = null
+    let contact: ContactRow | null = null
 
     if (payload.customer_phone) {
       const phone = `+${normalizePhone(payload.customer_phone)}`
       const { data } = await supabase
         .schema('crm')
         .from('contacts')
-        .select('id, workspace_id, name, phone, ctwa_clid:crm.leads!contact_id(ctwa_clid)')
+        .select('id, workspace_id, name, phone')
         .eq('phone', phone)
         .limit(1)
         .single()
-      contact = data
+      contact = data as ContactRow | null
     } else if (payload.erp_customer_id) {
       const { data } = await supabase
         .schema('crm')
@@ -79,7 +94,7 @@ async function processERPEvent(event: ReturnType<typeof parseERPWebhookEvent>) {
         .eq('erp_customer_id', payload.erp_customer_id)
         .limit(1)
         .single()
-      contact = data
+      contact = data as ContactRow | null
     }
 
     // Update erp_sale_events with contact reference
@@ -98,7 +113,7 @@ async function processERPEvent(event: ReturnType<typeof parseERPWebhookEvent>) {
           .eq('id', contact.id)
 
         // Find associated lead
-        const { data: lead } = await supabase
+        const { data: rawLead } = await supabase
           .schema('crm')
           .from('leads')
           .select('id, stage_id, workspace_id, ctwa_clid')
@@ -107,6 +122,7 @@ async function processERPEvent(event: ReturnType<typeof parseERPWebhookEvent>) {
           .order('created_at', { ascending: false })
           .limit(1)
           .single()
+        const lead = rawLead as LeadRow | null
 
         if (lead) {
           // Find won stage

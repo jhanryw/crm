@@ -1,10 +1,10 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Lead, PipelineStage } from '@/types'
 import { cn, formatCurrency, temperatureLabel, scoreColor } from '@/lib/utils'
-import { Flame, Plus, MoreHorizontal, Star } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Flame, Star } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { toast } from '@/components/ui/use-toast'
 
@@ -14,6 +14,7 @@ interface PipelineBoardProps {
 }
 
 export function PipelineBoard({ initialStages, initialLeads }: PipelineBoardProps) {
+  const router = useRouter()
   const [leads, setLeads] = useState(initialLeads)
   const [draggedId, setDraggedId] = useState<string | null>(null)
   const [dragOverStage, setDragOverStage] = useState<string | null>(null)
@@ -102,6 +103,7 @@ export function PipelineBoard({ initialStages, initialLeads }: PipelineBoardProp
                     lead={lead}
                     onDragStart={() => setDraggedId(lead.id)}
                     onDragEnd={() => { setDraggedId(null); setDragOverStage(null) }}
+                    onClick={() => router.push(`/leads/${lead.id}`)}
                   />
                 ))}
               </div>
@@ -117,17 +119,20 @@ function LeadCard({
   lead,
   onDragStart,
   onDragEnd,
+  onClick,
 }: {
   lead: Lead
   onDragStart: () => void
   onDragEnd: () => void
+  onClick: () => void
 }) {
   return (
     <div
       draggable
-      onDragStart={onDragStart}
+      onDragStart={e => { e.stopPropagation(); onDragStart() }}
       onDragEnd={onDragEnd}
-      className="bg-card border border-border rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-qarvon-500/50 transition-colors group"
+      onClick={onClick}
+      className="bg-card border border-border rounded-lg p-3 cursor-pointer hover:border-qarvon-500/50 transition-colors group"
     >
       {/* Name & score */}
       <div className="flex items-start justify-between gap-2 mb-2">

@@ -1,34 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { sendTextMessage, sendMediaMessage, sendTemplateMessage } from '@/lib/whatsapp/client'
+import { sendTextMessage, sendTemplateMessage } from '@/lib/whatsapp/client'
 import { sendIGMessage } from '@/lib/instagram/webhook'
 import { SendMessageRequest } from '@/types'
+
+// Local type for the query result (no generated DB types)
+interface ConversationRow {
+  id: string
+  workspace_id: string
+  external_id: string | null
+  channel: {
+    id: string
+    type: 'whatsapp' | 'instagram'
+    phone_number_id: string | null
+    access_token: string
+  } | null
+}
 
 export async function POST(req: NextRequest) {
   const supabase = createClient()
 
-  // Auth check
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body: SendMessageRequest = await req.json()
 
-  // Get conversation + channel
-  const { data: conversation, error } = await supabase
+  // channel:channels(*) — no schema prefix needed when already in messaging schema
+  const { data: rawConv, error } = await supabase
     .schema('messaging')
     .from('conversations')
-    .select(`
-      *,
-      channel:messaging.channels(*)
-    `)
+    .select('id, workspace_id, external_id, channel:channels(id, type, phone_number_id, access_token)')
     .eq('id', body.conversation_id)
     .single()
 
-  if (error || !conversation) {
+  if (error || !rawConv) {
     return NextResponse.json({ error: 'Conversation not found' }, { status: 404 })
   }
 
-  // Get agent
+  const conversation = rawConv as unknown as ConversationRow
+
+  if (!conversation.channel) {
+    return NextResponse.json({ error: 'Channel not found' }, { status: 404 })
+  }
+
   const { data: member } = await supabase
     .schema('crm')
     .from('workspace_members')
@@ -41,13 +55,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Not a member of this workspace' }, { status: 403 })
   }
 
-  const channel = (conversation as any).channel
+  const channel = conversation.channel
 
   try {
     let externalId: string | null = null
 
     if (channel.type === 'whatsapp') {
-      if (body.type === 'text' && body.content) {
+      if (body.type === 'text' && body.content && channel.phone_number_id) {
         const res = await sendTextMessage({
           phoneNumberId: channel.phone_number_id,
           accessToken: channel.access_token,
@@ -55,7 +69,7 @@ export async function POST(req: NextRequest) {
           text: body.content,
         })
         externalId = res.messages[0]?.id ?? null
-      } else if (body.type === 'template' && body.template_name) {
+      } else if (body.type === 'template' && body.template_name && channel.phone_number_id) {
         const res = await sendTemplateMessage({
           phoneNumberId: channel.phone_number_id,
           accessToken: channel.access_token,
@@ -76,7 +90,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Save message to DB
     const { data: message } = await supabase
       .schema('messaging')
       .from('messages')
@@ -95,7 +108,6 @@ export async function POST(req: NextRequest) {
       .select()
       .single()
 
-    // Update conversation last_message
     await supabase
       .schema('messaging')
       .from('conversations')
@@ -107,11 +119,9 @@ export async function POST(req: NextRequest) {
       .eq('id', conversation.id)
 
     return NextResponse.json({ message })
-  } catch (err: any) {
-    console.error('Send message error:', err)
-    return NextResponse.json(
-      { error: err?.message ?? 'Failed to send message' },
-      { status: 500 }
-    )
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Failed to send message'
+    console.error('[messages/send] error:', err)
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }
